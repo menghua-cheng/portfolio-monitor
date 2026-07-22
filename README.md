@@ -178,3 +178,7 @@ scripts/run_daily.sh         cron wrapper
 tests/                       pytest suite
 data/ reports/ logs/         generated (gitignored)
 ```
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
