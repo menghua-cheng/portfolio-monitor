@@ -8,6 +8,25 @@ database. Notes are bilingual (English / 繁體中文).
 
 I run it from cron after the US close and read the report in a browser.
 
+## Screenshots
+
+The daily report. The summary table shows each ticker's trend state, MA
+alignment, and any multi-line breakout tags, with the recent crossings listed
+underneath:
+
+![Report summary](docs/screenshots/overview.png)
+
+The interactive chart: moving-average lines, a marker at every cross (up-triangle
+for a breakout, down-triangle for a breakdown), a shaded band over multi-line
+clusters, and a hover popup naming each constituent crossing and its date:
+
+![Interactive chart with breakout detail](docs/screenshots/chart-hover.png)
+
+The report is bilingual; the top-right control switches between English and
+繁體中文, and the charts follow:
+
+![Chinese view](docs/screenshots/overview-zh.png)
+
 ## What it does
 
 1. Watchlist kept in a CSV (`config/portfolio.csv`), managed by a small CLI.
