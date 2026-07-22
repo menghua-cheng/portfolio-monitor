@@ -1,0 +1,15 @@
+# Program settings (tracked in git). The watchlist itself lives in portfolio.csv.
+history_years: 2
+ma_periods:
+  week: 5
+  month: 20
+  quarter: 60
+  half_year: 120
+  year: 240
+signals:
+  slope_lookback: 10
+  flat_threshold_pct: 0.5
+  double_window_days: 30
+  recent_window_days: 30
+data:
+  crosscheck_tolerance_pct: 1.0
