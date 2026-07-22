@@ -1,0 +1,192 @@
+{#- Bilingual (en/zh_TW) daily report. lang_mode: "switch" (browser, both langs +
+    top-right switcher, default EN) | "en" | "zh" (single language, used for email). -#}
+{%- macro t(en, zh) -%}
+{%- if lang_mode == 'switch' -%}<span class="i18n en">{{ en }}</span><span class="i18n zh">{{ zh }}</span>
+{%- elif lang_mode == 'zh' -%}{{ zh }}
+{%- else -%}{{ en }}
+{%- endif -%}
+{%- endmacro -%}
+<!doctype html>
+<html lang="{{ 'en' if lang_mode != 'zh' else 'zh-Hant' }}" data-lang="{{ 'zh' if lang_mode == 'zh' else 'en' }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>US Stock Portfolio Report</title>
+{%- if lang_mode == 'switch' %}
+<style>
+  html[data-lang="en"] .i18n.zh { display: none; }
+  html[data-lang="zh"] .i18n.en { display: none; }
+  .lang-switch { position: fixed; top: 10px; right: 12px; z-index: 1000;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: #ffffffee; border: 1px solid #dfe3e8; border-radius: 999px;
+    padding: 3px; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  .lang-btn { border: 0; background: transparent; cursor: pointer; font-size: 12px;
+    padding: 4px 10px; border-radius: 999px; color: #66707a; line-height: 1; }
+  .lang-btn.active { background: #1d6fb8; color: #fff; font-weight: 600; }
+</style>
+{%- endif %}
+</head>
+<body style="margin:0;">
+{% if plotly_js %}{{ plotly_js|safe }}{% endif %}
+{%- if lang_mode == 'switch' %}
+<div class="lang-switch">
+  <button class="lang-btn" data-l="en">EN</button>
+  <button class="lang-btn" data-l="zh">中文</button>
+</div>
+{%- endif %}
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2933;max-width:820px;margin:0 auto;padding:8px;">
+  <h1 style="font-size:22px;margin:0 0 2px;">{{ t('US Stock Portfolio Report', '美股投資組合報表') }}</h1>
+  <div style="color:#66707a;font-size:13px;margin-bottom:16px;">
+    {{ report_date }} &nbsp;·&nbsp; {{ tickers|length }} {{ t('holdings', '檔持股') }}
+    {% if data_source_note %}&nbsp;·&nbsp; {{ t(data_source_note, data_source_note_zh or data_source_note) }}{% endif %}
+  </div>
+
+  <!-- Portfolio summary -->
+  <table role="presentation" width="100%" style="border-collapse:collapse;margin-bottom:20px;font-size:14px;">
+    <tr style="background:#f4f6f8;text-align:left;">
+      <th style="padding:8px;border-bottom:2px solid #dfe3e8;">{{ t('Ticker', '代號') }}</th>
+      <th style="padding:8px;border-bottom:2px solid #dfe3e8;text-align:right;">{{ t('Close', '收盤') }}</th>
+      <th style="padding:8px;border-bottom:2px solid #dfe3e8;text-align:right;">{{ t('1d %', '單日 %') }}</th>
+      <th style="padding:8px;border-bottom:2px solid #dfe3e8;">{{ t('Trend state', '趨勢狀態') }}</th>
+      <th style="padding:8px;border-bottom:2px solid #dfe3e8;">{{ t('Signals & Trend', '訊號與趨勢') }}</th>
+    </tr>
+    {% for t_ in tickers %}
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #eef1f4;font-weight:600;">{{ t_.symbol }}</td>
+      <td style="padding:8px;border-bottom:1px solid #eef1f4;text-align:right;">{{ '%.2f'|format(t_.close) }}</td>
+      <td style="padding:8px;border-bottom:1px solid #eef1f4;text-align:right;color:{{ '#0a8f52' if t_.change_pct >= 0 else '#c0392b' }};">
+        {{ '%+.2f'|format(t_.change_pct) }}%
+      </td>
+      <td style="padding:8px;border-bottom:1px solid #eef1f4;">
+        <span style="padding:2px 8px;border-radius:10px;font-size:12px;background:{{ t_.state_bg }};color:{{ t_.state_fg }};">{{ t(t_.state_label_en, t_.state_label_zh) }}</span>
+      </td>
+      <td style="padding:8px;border-bottom:1px solid #eef1f4;font-size:13px;">
+        {# Today's fresh signals (fire only on the latest bar) #}
+        {% for s in t_.signals %}<div style="margin-bottom:2px;">⚡ {{ t(s.text_en, s.text_zh) }}
+          {% if s.note_en or s.note_zh %}<div style="color:#8a94a0;font-size:11px;margin-left:16px;">↳ {{ t(s.note_en or '', s.note_zh or '') }}</div>{% endif %}
+        </div>{% endfor %}
+        {# Always-present trend picture: MA alignment + multi-breakout tags #}
+        {% if t_.alignment_en %}
+        <div style="margin-top:{{ '4px' if t_.signals else '0' }};">
+          <span style="padding:1px 7px;border-radius:10px;font-size:11px;background:{{ t_.alignment_bg }};color:{{ t_.alignment_fg }};">{{ t(t_.alignment_en, t_.alignment_zh) }}</span>
+          {% for tag in t_.trend_tags %}<span style="padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;background:{{ '#e6f6ee' if 'breakout' in tag.text_en else '#fbeae7' }};color:{{ '#0a8f52' if 'breakout' in tag.text_en else '#c0392b' }};margin-left:3px;">{{ t(tag.text_en, tag.text_zh) }}</span>{% endfor %}
+        </div>
+        {% endif %}
+        {# Recent crossings within the lookback window, with days-ago #}
+        {% if t_.recent_crosses %}
+        <div style="color:#66707a;font-size:11px;margin-top:3px;">
+          <span style="color:#98a1ab;">{{ t('Recent:', '近期:') }}</span>
+          {% for r in t_.recent_crosses %}<div style="margin-left:6px;">· {{ t(r.text_en, r.text_zh) }}</div>{% endfor %}
+        </div>
+        {% endif %}
+        {% if not t_.signals and not t_.alignment_en and not t_.recent_crosses %}<span style="color:#98a1ab;">—</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <!-- MA legend -->
+  <div style="font-size:12px;color:#66707a;margin-bottom:12px;">
+    {{ t('MA lines:', '均線:') }}
+    {% for label_en, label_zh, color in ma_legend %}
+      <span style="display:inline-block;margin-right:10px;">
+        <span style="display:inline-block;width:12px;height:3px;background:{{ color }};vertical-align:middle;"></span>
+        {{ t(label_en, label_zh) }}
+      </span>
+    {% endfor %}
+  </div>
+
+  <!-- Per-ticker detail + chart -->
+  {% for t_ in tickers %}
+  <div style="margin-bottom:28px;border:1px solid #eef1f4;border-radius:8px;overflow:hidden;">
+    <div style="background:#f4f6f8;padding:10px 12px;">
+      <span style="font-size:16px;font-weight:700;">{{ t_.symbol }}</span>
+      <span style="color:#66707a;font-size:13px;">&nbsp; {{ t_.name }}</span>
+    </div>
+    <div style="padding:10px 12px;font-size:13px;color:#3e4c59;">
+      <table role="presentation" width="100%" style="border-collapse:collapse;">
+        <tr>
+          {% for en, zh, v in t_.ma_cells %}
+          <td style="padding:4px 8px;">
+            <div style="color:#98a1ab;font-size:11px;">{{ t(en, zh) }}</div>
+            <div style="font-weight:600;">{{ v }}</div>
+          </td>
+          {% endfor %}
+        </tr>
+      </table>
+    </div>
+    {% if t_.chart_html %}
+      <div style="padding:4px 6px;">{{ t_.chart_html|safe }}</div>
+      <noscript>
+        <img src="{{ t_.chart_src }}" alt="{{ t_.symbol }} chart" width="800" style="width:100%;max-width:800px;display:block;"/>
+      </noscript>
+    {% else %}
+      <img src="{{ t_.chart_src }}" alt="{{ t_.symbol }} chart" width="800" style="width:100%;max-width:800px;display:block;"/>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <div style="color:#98a1ab;font-size:11px;border-top:1px solid #eef1f4;padding-top:10px;">
+    {{ t('Generated by portfolio-monitor · data:', '由 portfolio-monitor 產生 · 資料來源:') }}
+    {{ data_source }} · {{ t('not investment advice.', '非投資建議。') }}
+  </div>
+</div>
+{%- if lang_mode == 'switch' %}
+<script>
+(function () {
+  // Re-label the Plotly charts (titles/axes/volume-hover) to match the language,
+  // since that text is baked into each figure rather than the toggled DOM spans.
+  function applyChartLang(l, tries) {
+    var reg = window.__pmChartI18n || {};
+    Object.keys(reg).forEach(function (id) {
+      var gd = document.getElementById(id);
+      var t = reg[id][l];
+      if (!t || !window.Plotly) return;
+      if (!gd || !gd.data) {            // chart not initialised yet — retry briefly
+        if ((tries || 0) < 15) setTimeout(function () { applyChartLang(l, (tries || 0) + 1); }, 150);
+        return;
+      }
+      window.Plotly.relayout(gd, {
+        'annotations[0].text': t.t0, 'annotations[1].text': t.t1,
+        'yaxis.title.text': t.y0, 'yaxis2.title.text': t.y1
+      });
+      var vidx = [];
+      gd.data.forEach(function (tr, i) { if (tr.type === 'bar') vidx.push(i); });
+      if (vidx.length) {
+        window.Plotly.restyle(gd, { hovertemplate: '%{y:,}<extra>' + t.vhover + '</extra>' }, vidx);
+      }
+      // Breakout/breakdown markers + multi-breakout ★ labels follow the language.
+      // Markers use `text` for their hover; cluster stars show a short `text`
+      // label but a detailed `hovertext` popup (which lines broke).
+      gd.data.forEach(function (tr, i) {
+        var key = tr.meta;
+        if (key === 'markUp' || key === 'markDown') {
+          if (t[key]) window.Plotly.restyle(gd, { text: [t[key]] }, [i]);
+        } else if (key === 'clusterUp' || key === 'clusterDown') {
+          var upd = {};
+          if (t[key]) upd.text = [t[key]];
+          if (t[key + 'Hover']) upd.hovertext = [t[key + 'Hover']];
+          if (upd.text || upd.hovertext) window.Plotly.restyle(gd, upd, [i]);
+        }
+      });
+    });
+  }
+  function setLang(l) {
+    document.documentElement.setAttribute('data-lang', l);
+    document.querySelectorAll('.lang-btn').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-l') === l);
+    });
+    applyChartLang(l);
+    try { localStorage.setItem('pm-lang', l); } catch (e) {}
+  }
+  document.querySelectorAll('.lang-btn').forEach(function (b) {
+    b.addEventListener('click', function () { setLang(b.getAttribute('data-l')); });
+  });
+  var saved = 'en';                       // default en_US
+  try { saved = localStorage.getItem('pm-lang') || 'en'; } catch (e) {}
+  setLang(saved);
+})();
+</script>
+{%- endif %}
+</body>
+</html>
