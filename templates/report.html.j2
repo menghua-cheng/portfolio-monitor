@@ -115,6 +115,38 @@
         </tr>
       </table>
     </div>
+    {% if t_.backtest %}
+    <div style="padding:8px 12px;border-top:1px dashed #eef1f4;font-size:12px;color:#3e4c59;">
+      <div style="font-weight:700;color:#66707a;font-size:11px;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px;">
+        {{ t('Signal Backtest', '訊號回測') }}
+      </div>
+      {% if t_.backtest.no_trades %}
+        <span style="color:#98a1ab;">{{ t('No strategy traded over the available history.', '在可用歷史中沒有任何策略進場。') }}</span>
+      {% else %}
+        {% set bt = t_.backtest %}
+        <div>
+          {{ t('Best strategy', '最佳策略') }}:
+          <strong>{{ t('Entry', '進場') }}×{{ bt.entry_degree }} / {{ t('Exit', '出場') }}×{{ bt.exit_degree }}</strong>
+          <span style="color:#98a1ab;">({{ bt.window }})</span>
+        </div>
+        <table role="presentation" style="border-collapse:collapse;margin-top:3px;">
+          <tr>
+            <td style="padding:2px 12px 2px 0;"><div style="color:#98a1ab;font-size:11px;">{{ t('Return', '報酬') }}</div>
+              <strong style="color:{{ '#c0392b' if bt.total_return_pct.startswith('-') else '#0a8f52' }};">{{ bt.total_return_pct }}</strong></td>
+            <td style="padding:2px 12px;"><div style="color:#98a1ab;font-size:11px;">CAGR</div><strong>{{ bt.cagr_pct }}</strong></td>
+            <td style="padding:2px 12px;"><div style="color:#98a1ab;font-size:11px;">{{ t('Max DD', '最大回撤') }}</div><strong style="color:#c0392b;">{{ bt.max_drawdown_pct }}</strong></td>
+            <td style="padding:2px 12px;"><div style="color:#98a1ab;font-size:11px;">{{ t('Trades', '交易') }}</div><strong>{{ bt.num_trades }}{% if bt.has_open_trade %}*{% endif %}</strong></td>
+            <td style="padding:2px 12px;"><div style="color:#98a1ab;font-size:11px;">{{ t('Win', '勝率') }}</div><strong>{{ bt.win_rate_pct }}</strong></td>
+            <td style="padding:2px 0 2px 12px;border-left:1px solid #eef1f4;"><div style="color:#98a1ab;font-size:11px;">{{ t('Buy &amp; Hold', '買進持有') }}</div><strong>{{ bt.buy_hold_pct }}</strong></td>
+          </tr>
+        </table>
+        {% if bt.has_open_trade %}<div style="color:#98a1ab;font-size:11px;margin-top:2px;">* {{ t('includes an open position marked to market', '含未平倉部位（以最新價估值）') }}</div>{% endif %}
+        <div style="color:#98a1ab;font-size:11px;margin-top:3px;font-style:italic;">
+          {{ t('Best-fit over the full history — hindsight-selected, not a forward recommendation.', '為全期歷史最佳擬合——事後挑選，非未來建議。') }}
+        </div>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if t_.chart_html %}
       <div style="padding:4px 6px;">{{ t_.chart_html|safe }}</div>
       <noscript>

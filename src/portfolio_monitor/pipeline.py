@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import charts, config, db, email_sender, indicators, report, signals
+from . import backtest, charts, config, db, email_sender, indicators, report, signals
 
 log = logging.getLogger("portfolio_monitor.pipeline")
 
@@ -66,13 +66,20 @@ def _process_ticker(conn, cfg: config.Config, symbol: str, name: str,
     # Always-present trend picture (MA alignment + multi-breakout + recent crosses).
     trend = signals.summarize_trend(df, ind, cfg.recent_window_days)
 
+    # Signal backtest: best (entry N, exit M) strategy vs buy-and-hold, computed
+    # ephemerally from the in-scope DataFrames (ADR-0003), hindsight-labeled.
+    bt = backtest.run_backtest(df, ind, symbol, window_days=cfg.recent_window_days,
+                               cost_bps=cfg.backtest_cost_bps,
+                               starting_cash=cfg.backtest_starting_cash)
+    backtest_view = report.build_backtest_view(bt)
+
     chart_path = charts.render_chart(symbol, df, ind, chart_dir)   # PNG failsafe
     chart_html = charts.render_interactive_html(symbol, df, ind)   # interactive
     src = report.chart_src_for(symbol, chart_path, "datauri")
     view = report.build_ticker_view(symbol, name, df, ind, state,
                                      [s.signal_type for s in detected], src,
                                      cross_events=cross_events, chart_html=chart_html,
-                                     trend=trend)
+                                     trend=trend, backtest_view=backtest_view)
     return view, cc.note, chart_path
 
 

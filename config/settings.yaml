@@ -11,5 +11,10 @@ signals:
   flat_threshold_pct: 0.5
   double_window_days: 30
   recent_window_days: 30
+backtest:
+  # Per-side trading cost in basis points, applied to every fill (entry + exit).
+  cost_bps: 5
+  # Notional capital for the equity curve; percentage metrics are scale-free.
+  starting_cash: 10000
 data:
   crosscheck_tolerance_pct: 1.0

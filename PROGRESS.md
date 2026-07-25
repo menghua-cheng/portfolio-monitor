@@ -42,6 +42,15 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
 
 24 tests pass. New dep: `plotly>=5.20` (in requirements.txt + venv).
 
+## Session 3 (2026-07-26) — signal backtest
+
+| Step | Feature | Status | Verification gate |
+|------|---------|--------|-------------------|
+| 20 | Signal backtest (best strategy vs buy-and-hold) | verified | New pure engine `backtest.py`: 4×4 grid of `(entry degree N, exit degree M)` strategies over a cumulative-from-fast degree cascade (edge-triggered), long-only, filled at next bar's split/dividend-adjusted open, compounded all-in/all-out, 5bps/side cost, open position marked to market; common all-warm window; best by CAGR (hindsight-labeled) vs buy-and-hold. Rendered as a compact bilingual block per ticker (no new chart), ephemeral (no new DB table). 10 new unit tests; **live run AAPL — best Entry×2/Exit×4 +58.7% vs buy-and-hold +66.3% over 2025-06-27→2026-07-24** (report block renders EN/中文). Design captured in `CONTEXT.md` + `docs/adr/0001-0004`. |
+
+34 tests pass. Design docs added: `CONTEXT.md` (glossary), `docs/adr/` (4 ADRs),
+`docs/plans/backtest-implementation.md`.
+
 ## Notes / decisions log
 - 2026-07-22: Project scaffolded. Using **Python 3.11** venv (system python3.14 lacks ensurepip and
   sudo is unavailable; 3.11 also has better prebuilt wheels for the data stack).
@@ -49,3 +58,9 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
   0.11.1 stooq reader unimplemented), so cross-check moved to **Tiingo** (free key, set `TIINGO_API_KEY`).
   Without a key: single-source yfinance + strong internal validation (NaN, non-positive, monotonic
   dates, dup dates, high<low, staleness >7d, extreme daily move >50%).
+- 2026-07-26: Backtest added. Degree = cumulative-from-fast cascade, deliberately stricter than the
+  report's `summarize_trend` "any distinct pairs" counting (ADR-0001). Fills use the split/dividend-
+  adjusted next-bar open `open×adj_close÷close` to stay lookahead-safe and split-consistent (ADR-0002).
+  Embedded in the daily report and computed ephemerally, no CLI and no `backtest_results` table by
+  design (ADR-0003). The "best" strategy is in-sample/hindsight-selected and labeled as such rather
+  than split train/test, since ~2y history barely covers the sma240 warm-up (ADR-0004).
