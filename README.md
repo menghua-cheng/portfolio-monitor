@@ -50,10 +50,19 @@ The report is bilingual; the top-right control switches between English and
    ▼ breakdown) with a hover popup naming the lines and the date; multi-line
    clusters get a shaded highlight band and a star label whose popup lists the
    constituent crossings. A static PNG is kept as a no-JS fallback and for email.
-6. Email: Gmail SMTP with the chart inlined as a PNG. Dry-run by default (writes
+6. Signal backtest: replays each ticker's own MA-cross signals over history and
+   reports, per ticker, the best of 16 strategies vs buy-and-hold. A strategy is
+   an `(entry degree N, exit degree M)` pair, where degree N means the fastest N
+   adjacent MA pairs have all crossed the same direction within the lookback
+   window (1=single … 4=quad). Trades are long-only, filled at the next bar's
+   split/dividend-adjusted open, compounded, and netted a small per-side cost;
+   the best strategy is chosen by CAGR and clearly labeled as hindsight-selected,
+   not a forward recommendation. Shown as a compact bilingual block under each
+   ticker in the report. See `docs/adr/` for the design rationale.
+7. Email: Gmail SMTP with the chart inlined as a PNG. Dry-run by default (writes
    an `.eml` for inspection). With `--send`, if SMTP is not configured the email
    step is skipped rather than failing, so a cron job stays green.
-7. Storage: SQLite at `data/portfolio.db`, all writes idempotent.
+8. Storage: SQLite at `data/portfolio.db`, all writes idempotent.
 
 ## Requirements
 
@@ -84,7 +93,8 @@ or use `scripts/run_daily.sh`, which sets `PYTHONPATH` itself.
 ## Configuration
 
 Program settings are in `config/settings.yaml` (history length, MA periods,
-signal windows, cross-check tolerance). The watchlist is `config/portfolio.csv`
+signal windows, cross-check tolerance, and the backtest's `cost_bps` per-side
+trading cost and `starting_cash`). The watchlist is `config/portfolio.csv`
 (`symbol,name` per row).
 
 Secrets go in `.env` (see `.env.example`):
@@ -172,8 +182,11 @@ config/settings.yaml         program settings (tracked)
 config/portfolio.example.csv example watchlist (tracked)
 config/portfolio.csv         your watchlist (gitignored)
 src/portfolio_monitor/       config, db, fetch, indicators, signals, charts,
-                             report, email_sender, pipeline
+                             backtest, report, email_sender, pipeline
 templates/report.html.j2     report template
+CONTEXT.md                   domain glossary (ubiquitous language)
+docs/adr/                    architecture decision records
+docs/plans/                  implementation plans
 scripts/run_daily.sh         cron wrapper
 tests/                       pytest suite
 data/ reports/ logs/         generated (gitignored)

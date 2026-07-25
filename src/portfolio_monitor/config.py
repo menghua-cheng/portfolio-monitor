@@ -96,6 +96,17 @@ class Config:
     def crosscheck_tolerance_pct(self) -> float:
         return float(self.settings.get("data", {}).get("crosscheck_tolerance_pct", 1.0))
 
+    @property
+    def backtest_cost_bps(self) -> float:
+        """Per-side trading cost (basis points) applied to every backtest fill."""
+        return float(self.settings.get("backtest", {}).get("cost_bps", 5.0))
+
+    @property
+    def backtest_starting_cash(self) -> float:
+        """Notional capital for the backtest equity curve (percentage metrics are
+        scale-free, so this only sets the curve's units)."""
+        return float(self.settings.get("backtest", {}).get("starting_cash", 10000.0))
+
 
 # --------------------------------------------------------------------------- #
 # settings.yaml

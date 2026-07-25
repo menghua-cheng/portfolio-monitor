@@ -17,6 +17,7 @@ import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import charts
+from .backtest import TickerBacktest
 from .signals import CrossEvent, TrendSummary
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -57,6 +58,47 @@ class SignalLine:
 
 
 @dataclass
+class BacktestView:
+    """Display-ready backtest summary for one ticker: the single best strategy by
+    CAGR vs buy-and-hold, all strings preformatted so the template stays dumb.
+    Rendered under each ticker; labeled as hindsight-selected (ADR-0004)."""
+    no_trades: bool
+    window: str = ""
+    entry_degree: int = 0
+    exit_degree: int = 0
+    total_return_pct: str = ""
+    cagr_pct: str = ""
+    max_drawdown_pct: str = ""
+    num_trades: int = 0
+    win_rate_pct: str = ""
+    has_open_trade: bool = False
+    buy_hold_pct: str = ""
+
+
+def _pct(x: float) -> str:
+    return f"{x * 100:+.1f}%"
+
+
+def build_backtest_view(bt: TickerBacktest | None) -> BacktestView:
+    """Map an engine TickerBacktest to a display view. Insufficient history or a
+    ticker no strategy ever traded both collapse to the muted no_trades state."""
+    if bt is None or bt.window_start is None or bt.best is None:
+        return BacktestView(no_trades=True)
+    b = bt.best
+    dd_val = b.max_drawdown * 100
+    dd = f"-{dd_val:.1f}%" if dd_val >= 0.05 else "0.0%"
+    return BacktestView(
+        no_trades=False,
+        window=f"{bt.window_start} → {bt.window_end}",
+        entry_degree=b.entry_degree, exit_degree=b.exit_degree,
+        total_return_pct=_pct(b.total_return), cagr_pct=_pct(b.cagr),
+        max_drawdown_pct=dd, num_trades=b.num_trades,
+        win_rate_pct=f"{b.win_rate * 100:.0f}%", has_open_trade=b.has_open_trade,
+        buy_hold_pct=_pct(bt.buy_hold_return if bt.buy_hold_return is not None else 0.0),
+    )
+
+
+@dataclass
 class TickerView:
     symbol: str
     name: str
@@ -77,6 +119,8 @@ class TickerView:
     alignment_bg: str = "#f0f2f4"
     trend_tags: list[SignalLine] = field(default_factory=list)
     recent_crosses: list[SignalLine] = field(default_factory=list)
+    # --- signal backtest (best strategy vs buy-and-hold; hindsight-selected) ---
+    backtest: "BacktestView | None" = None
 
 
 @dataclass
@@ -114,7 +158,8 @@ def build_ticker_view(symbol: str, name: str, prices: pd.DataFrame,
                       today_signal_types: list[str], chart_src: str,
                       cross_events: list[CrossEvent] | None = None,
                       chart_html: str | None = None,
-                      trend: TrendSummary | None = None) -> TickerView:
+                      trend: TrendSummary | None = None,
+                      backtest_view: "BacktestView | None" = None) -> TickerView:
     prices = prices.sort_values("date")
     last_close = float(prices["close"].iloc[-1])
     last_ind = indicators.sort_values("date").iloc[-1] if not indicators.empty else {}
@@ -161,6 +206,7 @@ def build_ticker_view(symbol: str, name: str, prices: pd.DataFrame,
         alignment_en=align_en, alignment_zh=align_zh,
         alignment_fg=align_fg, alignment_bg=align_bg,
         trend_tags=trend_tags, recent_crosses=recent_lines,
+        backtest=backtest_view,
     )
 
 
