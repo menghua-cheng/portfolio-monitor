@@ -253,6 +253,48 @@ def fetch_history(ticker: str, years: int = 2,
     return chosen.sort_values("date").reset_index(drop=True), cc
 
 
+# --------------------------------------------------------------------------- #
+# Company metadata (name lookup for `config add`)
+# --------------------------------------------------------------------------- #
+def _tiingo_name(ticker: str, api_key: str | None = None) -> str | None:
+    """Company name from Tiingo's metadata endpoint. Reliable when a key is set;
+    returns None without a key or on any failure."""
+    api_key = api_key or os.getenv("TIINGO_API_KEY", "")
+    if not api_key:
+        return None
+    url = f"https://api.tiingo.com/tiingo/daily/{ticker.lower()}?token={api_key}"
+    try:
+        req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode())
+    except Exception as exc:
+        log.debug("tiingo name lookup failed for %s: %s", ticker, exc)
+        return None
+    name = (payload.get("name") or "").strip()
+    return name or None
+
+
+def _yfinance_name(ticker: str) -> str | None:
+    """Company name from yfinance `.info` (longName/shortName). Best-effort: the
+    quoteSummary endpoint is often rate-limited or crumb-blocked, so treat any
+    failure as 'not found'."""
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).info
+    except Exception as exc:
+        log.debug("yfinance name lookup failed for %s: %s", ticker, exc)
+        return None
+    name = (info.get("longName") or info.get("shortName") or "").strip()
+    return name or None
+
+
+def fetch_company_name(ticker: str) -> str | None:
+    """Best-effort company name for a symbol, so `config add SYMBOL` needs no
+    manually typed name. Tries Tiingo metadata first (reliable when keyed), then
+    yfinance; returns None if neither yields a name."""
+    return _tiingo_name(ticker) or _yfinance_name(ticker)
+
+
 def to_price_rows(ticker: str, df: pd.DataFrame) -> list[dict]:
     """Convert a fetched DataFrame into db.upsert_prices row dicts."""
     rows = []

@@ -168,14 +168,28 @@ def load_config(env_path: Path = ENV_PATH) -> Config:
     return Config(tickers=_read_tickers(), settings=_load_settings(), email=email)
 
 
-def add_ticker(symbol: str, name: str = "") -> None:
+def add_ticker(symbol: str, name: str = "") -> str:
+    """Add or update a watchlist ticker. When no name is given, keep any existing
+    name, otherwise look one up automatically (Tiingo/yfinance). Returns the
+    resolved name (possibly empty if the lookup found nothing)."""
     symbol = symbol.upper()
     tickers = {t.symbol: t for t in _read_tickers()}
     existing = tickers.get(symbol)
-    tickers[symbol] = Ticker(symbol=symbol, name=name or (existing.name if existing else ""))
+    if not name:
+        if existing and existing.name:
+            name = existing.name
+        else:
+            from . import fetch  # local import keeps yfinance out of module load
+            # The add CLI doesn't go through load_config(), so load .env here to
+            # make TIINGO_API_KEY available to the (preferred) Tiingo name lookup.
+            if ENV_PATH.exists():
+                load_dotenv(ENV_PATH)
+            name = fetch.fetch_company_name(symbol) or ""
+    tickers[symbol] = Ticker(symbol=symbol, name=name)
     _write_tickers(sorted(tickers.values(), key=lambda t: t.symbol))
     with db.connect() as conn:
         db.upsert_security(conn, symbol, name or None)
+    return name
 
 
 def remove_ticker(symbol: str) -> None:
@@ -204,7 +218,8 @@ def _cli(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="List watchlist tickers.")
     p_add = sub.add_parser("add", help="Add or update a ticker.")
     p_add.add_argument("symbol")
-    p_add.add_argument("name", nargs="?", default="")
+    p_add.add_argument("name", nargs="?", default="",
+                       help="Optional; auto-looked-up (Tiingo/yfinance) when omitted.")
     p_rm = sub.add_parser("remove", help="Remove a ticker.")
     p_rm.add_argument("symbol")
     sub.add_parser("sync", help="Sync the DB securities table to the watchlist.")
@@ -216,8 +231,12 @@ def _cli(argv: list[str] | None = None) -> int:
             print(f"{t.symbol:8s} {t.name}")
         print(f"\n{len(cfg.tickers)} ticker(s) from {_tickers_path().name}.")
     elif args.cmd == "add":
-        add_ticker(args.symbol, args.name)
-        print(f"Added {args.symbol.upper()}.")
+        resolved = add_ticker(args.symbol, args.name)
+        sym = args.symbol.upper()
+        if resolved:
+            print(f"Added {sym} ({resolved}).")
+        else:
+            print(f"Added {sym} (name not found; pass it explicitly to set one).")
     elif args.cmd == "remove":
         remove_ticker(args.symbol)
         print(f"Removed {args.symbol.upper()}.")

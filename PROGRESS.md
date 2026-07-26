@@ -51,6 +51,14 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
 34 tests pass. Design docs added: `CONTEXT.md` (glossary), `docs/adr/` (4 ADRs),
 `docs/plans/backtest-implementation.md`.
 
+## Session 4 (2026-07-26) — auto company-name lookup
+
+| Step | Feature | Status | Verification gate |
+|------|---------|--------|-------------------|
+| 21 | Auto-fetch company name on `config add` | verified | `config add SYMBOL` with no name now resolves it via `fetch.fetch_company_name` — Tiingo metadata first (reliable, uses `TIINGO_API_KEY`), yfinance `.info` as best-effort fallback (its quoteSummary endpoint currently 401s), blank if neither resolves. Explicit name still wins; an existing name is preserved on re-add. `add_ticker` loads `.env` itself since the config CLI doesn't call `load_config()`. 8 new tests (lookup precedence + add wiring, isolated onto tmp csv/db). **Live: `config add GOOGL` → "Alphabet Inc - Class A"** (watchlist restored after). |
+
+42 tests pass.
+
 ## Notes / decisions log
 - 2026-07-22: Project scaffolded. Using **Python 3.11** venv (system python3.14 lacks ensurepip and
   sudo is unavailable; 3.11 also has better prebuilt wheels for the data stack).
