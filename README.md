@@ -29,7 +29,8 @@ The report is bilingual; the top-right control switches between English and
 
 ## What it does
 
-1. Watchlist kept in a CSV (`config/portfolio.csv`), managed by a small CLI.
+1. Watchlist kept in a CSV (`config/portfolio.csv`), managed by a small CLI;
+   adding a symbol auto-fills the company name (Tiingo, then yfinance).
 2. Daily OHLCV + volume fetch from Yahoo Finance (via `yfinance`), with an
    optional independent Tiingo cross-check and a set of internal data-quality
    checks (NaN, non-positive prices, non-monotonic/duplicate dates, high < low,
@@ -126,10 +127,16 @@ internal checks.
 ```bash
 export PYTHONPATH=src
 ./.venv/bin/python -m portfolio_monitor.config list
-./.venv/bin/python -m portfolio_monitor.config add NVDA "NVIDIA Corp."
+./.venv/bin/python -m portfolio_monitor.config add NVDA          # name auto-looked-up
+./.venv/bin/python -m portfolio_monitor.config add NVDA "My label"  # or set it yourself
 ./.venv/bin/python -m portfolio_monitor.config remove NVDA
 ./.venv/bin/python -m portfolio_monitor.config sync   # reconcile the DB to the CSV
 ```
+
+When you `add` a symbol without a name, the company name is fetched
+automatically — Tiingo metadata first (needs `TIINGO_API_KEY`), then yfinance as
+a fallback. If neither resolves a name, the symbol is still added with a blank
+name and you can set one by passing it explicitly.
 
 ## Running
 
