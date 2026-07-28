@@ -1,6 +1,8 @@
 # Secrets and personal config
 .env
 config/portfolio.csv
+# personal Claude Code project instructions
+CLAUDE.md
 
 # Python
 .venv/
