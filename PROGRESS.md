@@ -67,6 +67,14 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
 
 42 tests pass.
 
+## Session 6 (2026-07-29) — multi-ticker add/remove
+
+| Step | Feature | Status | Verification gate |
+|------|---------|--------|-------------------|
+| 23 | `config add/remove` accept multiple symbols | verified | `add`/`remove` now take one-or-more symbols (`add NVDA AAPL TSM`), each auto-name-resolved on add. Custom names moved from a positional arg to `--name` (single-symbol only; errors with multiple) — the old `add SYM "Name"` positional form is removed. `remove` reports per-symbol presence. 5 new tests (multi-add, multi-remove, `--name` guard, single+`--name`, remove presence). **Live: `add GOOGL TSM` → Alphabet + Taiwan Semiconductor; `remove GOOGL TSM` restored the watchlist.** 47 tests pass. README updated. |
+
+47 tests pass.
+
 ## Notes / decisions log
 - 2026-07-22: Project scaffolded. Using **Python 3.11** venv (system python3.14 lacks ensurepip and
   sudo is unavailable; 3.11 also has better prebuilt wheels for the data stack).

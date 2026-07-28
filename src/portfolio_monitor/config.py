@@ -192,11 +192,15 @@ def add_ticker(symbol: str, name: str = "") -> str:
     return name
 
 
-def remove_ticker(symbol: str) -> None:
+def remove_ticker(symbol: str) -> bool:
+    """Remove a ticker from the watchlist + DB. Returns True if it was present."""
     symbol = symbol.upper()
-    _write_tickers([t for t in _read_tickers() if t.symbol != symbol])
+    tickers = _read_tickers()
+    present = any(t.symbol == symbol for t in tickers)
+    _write_tickers([t for t in tickers if t.symbol != symbol])
     with db.connect() as conn:
         db.remove_security(conn, symbol)
+    return present
 
 
 def sync_securities() -> None:
@@ -216,12 +220,15 @@ def _cli(argv: list[str] | None = None) -> int:
                                      description="Manage the portfolio watchlist.")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="List watchlist tickers.")
-    p_add = sub.add_parser("add", help="Add or update a ticker.")
-    p_add.add_argument("symbol")
-    p_add.add_argument("name", nargs="?", default="",
-                       help="Optional; auto-looked-up (Tiingo/yfinance) when omitted.")
-    p_rm = sub.add_parser("remove", help="Remove a ticker.")
-    p_rm.add_argument("symbol")
+    p_add = sub.add_parser("add", help="Add or update one or more tickers.")
+    p_add.add_argument("symbols", nargs="+", metavar="SYMBOL",
+                       help="One or more ticker symbols.")
+    p_add.add_argument("--name", default="",
+                       help="Custom name; only valid with a single symbol. "
+                            "Otherwise names are auto-looked-up (Tiingo/yfinance).")
+    p_rm = sub.add_parser("remove", help="Remove one or more tickers.")
+    p_rm.add_argument("symbols", nargs="+", metavar="SYMBOL",
+                      help="One or more ticker symbols.")
     sub.add_parser("sync", help="Sync the DB securities table to the watchlist.")
 
     args = parser.parse_args(argv)
@@ -231,15 +238,19 @@ def _cli(argv: list[str] | None = None) -> int:
             print(f"{t.symbol:8s} {t.name}")
         print(f"\n{len(cfg.tickers)} ticker(s) from {_tickers_path().name}.")
     elif args.cmd == "add":
-        resolved = add_ticker(args.symbol, args.name)
-        sym = args.symbol.upper()
-        if resolved:
-            print(f"Added {sym} ({resolved}).")
-        else:
-            print(f"Added {sym} (name not found; pass it explicitly to set one).")
+        if args.name and len(args.symbols) > 1:
+            parser.error("--name can only be used with a single symbol")
+        for sym in args.symbols:
+            resolved = add_ticker(sym, args.name)
+            s = sym.upper()
+            if resolved:
+                print(f"Added {s} ({resolved}).")
+            else:
+                print(f"Added {s} (name not found; use --name to set one).")
     elif args.cmd == "remove":
-        remove_ticker(args.symbol)
-        print(f"Removed {args.symbol.upper()}.")
+        for sym in args.symbols:
+            s = sym.upper()
+            print(f"Removed {s}." if remove_ticker(sym) else f"{s} not in watchlist.")
     elif args.cmd == "sync":
         sync_securities()
         print("Synced DB securities to watchlist.")

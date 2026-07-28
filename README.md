@@ -136,16 +136,17 @@ internal checks.
 
 ```bash
 uv run portfolio-monitor-config list
-uv run portfolio-monitor-config add NVDA           # name auto-looked-up
-uv run portfolio-monitor-config add NVDA "My label"   # or set it yourself
-uv run portfolio-monitor-config remove NVDA
+uv run portfolio-monitor-config add NVDA AAPL TSM        # one or more; names auto-looked-up
+uv run portfolio-monitor-config add NVDA --name "My label"  # single symbol, custom name
+uv run portfolio-monitor-config remove NVDA AAPL         # one or more
 uv run portfolio-monitor-config sync   # reconcile the DB to the CSV
 ```
 
-When you `add` a symbol without a name, the company name is fetched
-automatically — Tiingo metadata first (needs `TIINGO_API_KEY`), then yfinance as
-a fallback. If neither resolves a name, the symbol is still added with a blank
-name and you can set one by passing it explicitly.
+`add` and `remove` accept multiple symbols. When you `add` without `--name`, the
+company name is fetched automatically — Tiingo metadata first (needs
+`TIINGO_API_KEY`), then yfinance as a fallback; if neither resolves a name, the
+symbol is still added with a blank name. `--name` sets a custom name and is only
+valid with a single symbol.
 
 ## Running
 

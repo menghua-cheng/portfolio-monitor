@@ -80,3 +80,42 @@ def test_add_ticker_empty_when_lookup_finds_nothing(isolated, monkeypatch):
     resolved = config.add_ticker("ZZZZ")
     assert resolved == ""
     assert {t.symbol: t.name for t in config._read_tickers()}["ZZZZ"] == ""
+
+
+def test_remove_ticker_reports_presence(isolated, monkeypatch):
+    monkeypatch.setattr(fetch, "fetch_company_name", lambda s: "X")
+    config.add_ticker("AAPL")
+    assert config.remove_ticker("AAPL") is True     # was present
+    assert config.remove_ticker("AAPL") is False    # already gone
+
+
+# --- CLI: multiple symbols --------------------------------------------------
+def test_cli_add_multiple_symbols(isolated, monkeypatch):
+    monkeypatch.setattr(fetch, "fetch_company_name", lambda s: f"{s.upper()} Inc")
+    rc = config._cli(["add", "NVDA", "AAPL", "TSM"])
+    assert rc == 0
+    names = {t.symbol: t.name for t in config._read_tickers()}
+    assert names == {"NVDA": "NVDA Inc", "AAPL": "AAPL Inc", "TSM": "TSM Inc"}
+
+
+def test_cli_add_name_with_multiple_symbols_errors(isolated):
+    # argparse's parser.error() exits with SystemExit(2).
+    with pytest.raises(SystemExit):
+        config._cli(["add", "NVDA", "AAPL", "--name", "Nope"])
+
+
+def test_cli_add_single_symbol_with_name(isolated, monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(fetch, "fetch_company_name",
+                        lambda s: called.__setitem__("n", called["n"] + 1) or "AUTO")
+    rc = config._cli(["add", "NVDA", "--name", "My NVIDIA"])
+    assert rc == 0 and called["n"] == 0             # explicit name -> no lookup
+    assert {t.symbol: t.name for t in config._read_tickers()}["NVDA"] == "My NVIDIA"
+
+
+def test_cli_remove_multiple_symbols(isolated, monkeypatch):
+    monkeypatch.setattr(fetch, "fetch_company_name", lambda s: "X")
+    config._cli(["add", "NVDA", "AAPL", "TSM"])
+    rc = config._cli(["remove", "NVDA", "TSM"])
+    assert rc == 0
+    assert [t.symbol for t in config._read_tickers()] == ["AAPL"]
