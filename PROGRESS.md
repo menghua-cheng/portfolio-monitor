@@ -59,6 +59,14 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
 
 42 tests pass.
 
+## Session 5 (2026-07-28) — uv packaging + console scripts
+
+| Step | Feature | Status | Verification gate |
+|------|---------|--------|-------------------|
+| 22 | `pyproject.toml` + console scripts (uv-native) | verified | Added `pyproject.toml` (hatchling, src layout, deps migrated from requirements.txt, pytest in a `dev` dependency-group) with console scripts `portfolio-monitor` → `pipeline:_cli` and `portfolio-monitor-config` → `config:_cli`; committed `uv.lock`. `uv sync` installs the project editable, so **no `PYTHONPATH` is needed anymore** — fixes the recurring `ModuleNotFoundError: No module named 'portfolio_monitor'` / `attempted relative import` errors when running from a fresh shell. Verified with `PYTHONPATH` unset: `uv run portfolio-monitor-config list`, `uv run python -m portfolio_monitor.config list`, `uv run portfolio-monitor --help`, and `uv run pytest -q` (42 pass). README updated to the console-script flow (plain-venv/`requirements.txt` kept as a fallback). `scripts/run_daily.sh` left as-is (its `PYTHONPATH=src` form stays compatible with both install methods). |
+
+42 tests pass.
+
 ## Notes / decisions log
 - 2026-07-22: Project scaffolded. Using **Python 3.11** venv (system python3.14 lacks ensurepip and
   sudo is unavailable; 3.11 also has better prebuilt wheels for the data stack).
@@ -72,3 +80,6 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
   Embedded in the daily report and computed ephemerally, no CLI and no `backtest_results` table by
   design (ADR-0003). The "best" strategy is in-sample/hindsight-selected and labeled as such rather
   than split train/test, since ~2y history barely covers the sma240 warm-up (ADR-0004).
+- 2026-07-28: Adopted `pyproject.toml` (hatchling, src layout) with `uv.lock` and two console scripts
+  so `uv sync` installs the package and no `PYTHONPATH` is needed. `requirements.txt` kept as a
+  pip/venv fallback (dependency lists may drift; pyproject is the source of truth for uv users).

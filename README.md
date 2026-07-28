@@ -67,29 +67,39 @@ The report is bilingual; the top-right control switches between English and
 
 ## Requirements
 
-- Python 3.11. A local venv is expected at `.venv`.
+- Python 3.11, in a local venv at `.venv`. Managed with [uv](https://docs.astral.sh/uv/) (recommended).
 
 ## Setup
 
 ```bash
-python3.11 -m venv .venv
-./.venv/bin/pip install -r requirements.txt
+uv sync                                                 # creates .venv, installs the project
 
-cp config/portfolio.example.csv config/portfolio.csv   # then edit your holdings
-cp .env.example .env                                    # optional, for email/Tiingo
+cp config/portfolio.example.csv config/portfolio.csv    # then edit your holdings
+cp .env.example .env                                     # optional, for email/Tiingo
+```
+
+`uv sync` installs the package itself (from `pyproject.toml`), so there is **no
+`PYTHONPATH` to set** — the commands below run from anywhere in the repo.
+
+```bash
+uv run portfolio-monitor --help
 ```
 
 `config/portfolio.csv` and `.env` are gitignored. Until you create
 `portfolio.csv`, the loader falls back to `portfolio.example.csv`.
 
-The package lives under `src/`. Either export the path per shell:
+<details><summary>…without uv (plain venv + pip)</summary>
 
 ```bash
-export PYTHONPATH=src
-./.venv/bin/python -m portfolio_monitor.pipeline --help
+python3.11 -m venv .venv
+./.venv/bin/pip install -e .          # or: pip install -r requirements.txt
+./.venv/bin/portfolio-monitor --help
 ```
 
-or use `scripts/run_daily.sh`, which sets `PYTHONPATH` itself.
+If you install with `requirements.txt` instead of `-e .`, the package isn't
+installed, so run modules with `PYTHONPATH=src ./.venv/bin/python -m …` or use
+`scripts/run_daily.sh`, which sets `PYTHONPATH` itself.
+</details>
 
 ## Configuration
 
@@ -125,12 +135,11 @@ internal checks.
 ## Managing the watchlist
 
 ```bash
-export PYTHONPATH=src
-./.venv/bin/python -m portfolio_monitor.config list
-./.venv/bin/python -m portfolio_monitor.config add NVDA          # name auto-looked-up
-./.venv/bin/python -m portfolio_monitor.config add NVDA "My label"  # or set it yourself
-./.venv/bin/python -m portfolio_monitor.config remove NVDA
-./.venv/bin/python -m portfolio_monitor.config sync   # reconcile the DB to the CSV
+uv run portfolio-monitor-config list
+uv run portfolio-monitor-config add NVDA           # name auto-looked-up
+uv run portfolio-monitor-config add NVDA "My label"   # or set it yourself
+uv run portfolio-monitor-config remove NVDA
+uv run portfolio-monitor-config sync   # reconcile the DB to the CSV
 ```
 
 When you `add` a symbol without a name, the company name is fetched
@@ -141,11 +150,10 @@ name and you can set one by passing it explicitly.
 ## Running
 
 ```bash
-export PYTHONPATH=src
-./.venv/bin/python -m portfolio_monitor.pipeline --verbose      # dry-run email
-./.venv/bin/python -m portfolio_monitor.pipeline --send         # send (needs .env)
-./.venv/bin/python -m portfolio_monitor.pipeline --no-email     # HTML only
-./.venv/bin/python -m portfolio_monitor.pipeline --tickers AAPL MSFT
+uv run portfolio-monitor --verbose      # dry-run email
+uv run portfolio-monitor --send         # send (needs .env)
+uv run portfolio-monitor --no-email     # HTML only
+uv run portfolio-monitor --tickers AAPL MSFT
 ```
 
 Outputs:
@@ -172,8 +180,7 @@ is set.
 ## Tests
 
 ```bash
-export PYTHONPATH=src
-./.venv/bin/python -m pytest -q
+uv run pytest -q
 ```
 
 ## Data sources and disclaimer
@@ -185,6 +192,8 @@ not investment advice.
 ## Layout
 
 ```
+pyproject.toml               project metadata, deps, console scripts
+uv.lock                      pinned dependency lockfile (uv sync)
 config/settings.yaml         program settings (tracked)
 config/portfolio.example.csv example watchlist (tracked)
 config/portfolio.csv         your watchlist (gitignored)
