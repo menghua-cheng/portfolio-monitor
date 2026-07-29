@@ -95,6 +95,19 @@ horizon, over the tickers that have data at both ends, with that count reported.
 The watchlist carries no share counts, so there is no position-weighted return to
 compute.
 
+**Explorer** (interactive):
+The standalone HTML artifact that recomputes Backtests in a browser from embedded
+price data, with no server. Its engine is a *second implementation* of the Python
+one, so the two are held together by a parity test rather than by convention —
+"the explorer" always means this artifact, never the `portfolio-monitor-backtest`
+CLI, which is the same engine.
+
+**Parity**:
+The requirement that the JavaScript and Python engines return identical results
+for identical inputs. Enforced by driving both from one spec matrix over the same
+rounded price payload and demanding agreement to 1e-9. A parity failure means the
+port is stale, not that a test is flaky.
+
 **Warm-up** vs **trade window**:
 The Warm-up is the leading stretch of history consumed before the slowest MA in
 the ladder has a value; the trade window is what remains and is the only part a

@@ -214,6 +214,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top", type=int, default=10,
                    help="Show this many grid rows per ticker; 0 = all.")
     p.add_argument("--json", action="store_true", help="Emit JSON instead of tables.")
+    p.add_argument("--html", nargs="?", const="", metavar="PATH",
+                   help="Write a standalone interactive HTML explorer instead of a "
+                        "table. Recomputes in the browser — no server, no network. "
+                        "Optional PATH; defaults to reports/backtest-explorer-<date>.html.")
+    p.add_argument("--html-years", type=int, metavar="N",
+                   help="Trim the history embedded in --html to N years, to keep the "
+                        "file portable (default: everything cached).")
     p.add_argument("--list-rules", action="store_true",
                    help="Print the available signal rules and exit.")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -262,6 +269,23 @@ def _cli(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    if args.html is not None:
+        from pathlib import Path as _Path
+
+        from . import explorer
+        out = _Path(args.html) if args.html else None
+        syms = [s.upper() for s in args.symbols] or None
+        with db.connect() as conn:
+            try:
+                path, size = explorer.write_html(conn, cfg, out=out, symbols=syms,
+                                                 max_years=args.html_years)
+            except RuntimeError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
+        print(f"Interactive explorer: {path}  ({size / 1024:.0f} KB, self-contained)")
+        print("Open it in a browser — it recomputes locally, no server needed.")
+        return 0
 
     wanted = {s.upper() for s in args.symbols}
     tickers = [(t.symbol, t.name) for t in cfg.tickers

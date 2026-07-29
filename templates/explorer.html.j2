@@ -1,0 +1,168 @@
+{#- Standalone interactive backtest explorer. One file, no service, no network:
+    the price history, the engine (a JS port of backtest.py) and the UI are all
+    inlined. See docs/adr/0009. `payload_json` is emitted with |safe because it is
+    json.dumps output, not user text. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest Explorer</title>
+<style>
+  :root { --fg:#1f2933; --muted:#66707a; --line:#dfe3e8; --soft:#f4f6f8; --accent:#1d6fb8; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+         color:var(--fg); background:#fff; }
+  .wrap { max-width:1180px; margin:0 auto; padding:14px; }
+  h1 { font-size:21px; margin:0 0 2px; }
+  h2 { font-size:14px; margin:22px 0 8px; text-transform:uppercase; letter-spacing:.04em;
+       color:var(--muted); }
+  .muted { color:var(--muted); font-size:12px; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; }
+  .pad { padding:8px 2px; }
+  .banner { font-size:12px; padding:7px 10px; border-radius:5px; margin:10px 0; }
+  .ok-banner { background:#e6f6ee; color:#0a6b40; border:1px solid #b6e2cc; }
+  .bad-banner { background:#fbeae7; color:#8e2b1f; border:1px solid #f0c3bb; }
+  .bad { color:#c0392b; }
+  .warn { color:#8a6d3b; background:#fcf8e3; border-left:3px solid #e8d59a;
+          padding:5px 8px; margin-top:6px; font-size:12px; }
+  .controls { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+              gap:9px 12px; background:var(--soft); border:1px solid var(--line);
+              border-radius:6px; padding:12px; }
+  .controls label { display:block; font-size:11px; color:var(--muted); margin-bottom:3px; }
+  .controls input, .controls select { width:100%; padding:5px 6px; font-size:13px;
+    border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--fg); }
+  .wide { grid-column:span 2; }
+  .rowline { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:10px 0; }
+  button { font-size:12px; padding:5px 11px; border:1px solid var(--line); background:#fff;
+           border-radius:5px; cursor:pointer; color:var(--fg); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+  button:hover { border-color:var(--accent); }
+  #summary { font-size:13px; line-height:1.7; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th { background:var(--soft); text-align:right; padding:6px 8px; white-space:nowrap;
+       border-bottom:2px solid var(--line); font-size:11px; text-transform:uppercase;
+       letter-spacing:.03em; color:var(--muted); }
+  th.l, td.l { text-align:left; }
+  td { padding:5px 8px; border-bottom:1px solid #eef1f4; text-align:right; white-space:nowrap; }
+  tr.row { cursor:pointer; }
+  tr.row:hover td { background:#f8fafc; }
+  tr.sel td { background:#eaf2fa; }
+  .chartbox { position:relative; border:1px solid var(--line); border-radius:6px;
+              padding:6px; margin-bottom:12px; }
+  .tip { position:absolute; pointer-events:none; opacity:0; background:#fffffff2;
+         border:1px solid var(--line); border-radius:4px; padding:5px 7px; font-size:11px;
+         line-height:1.5; box-shadow:0 1px 4px rgba(0,0,0,.12); white-space:nowrap; }
+  .legend { font-size:11px; color:var(--muted); padding:2px 4px 6px; }
+  .cols { display:grid; grid-template-columns:1fr; gap:16px; }
+  @media (min-width:1000px) { .cols { grid-template-columns:minmax(420px,1fr) minmax(430px,1.1fr); } }
+  .scroll { overflow-x:auto; }
+  details { font-size:12px; color:var(--muted); margin-top:6px; }
+  code { background:var(--soft); padding:1px 4px; border-radius:3px; font-size:11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Backtest Explorer</h1>
+  <div class="muted">Generated {{ generated }} · runs entirely in this file — no server,
+    no network. Change anything below and it recomputes here.</div>
+
+  <div id="selfcheck" class="banner">Checking engine…</div>
+
+  <div class="controls">
+    <div><label for="symbol">Ticker</label><select id="symbol"></select></div>
+    <div><label for="interval">Bar interval</label>
+      <select id="interval">
+        <option value="daily">daily</option>
+        <option value="weekly">weekly</option>
+        <option value="monthly">monthly</option>
+      </select></div>
+    <div><label for="maPeriods">MA ladder (bars)</label>
+      <input id="maPeriods" placeholder="5,20,60,120,240"></div>
+    <div><label for="maKind">MA family</label>
+      <select id="maKind"><option value="sma">sma</option><option value="ema">ema</option></select></div>
+    <div><label for="start">Start (ISO)</label><input id="start" placeholder="e.g. 2020-01-01"></div>
+    <div><label for="end">End (ISO)</label><input id="end" placeholder="e.g. 2024-12-31"></div>
+    <div class="wide"><label for="entries">Entry rules (comma list / group token)</label>
+      <input id="entries" class="mono"></div>
+    <div class="wide"><label for="exits">Exit rules (comma list / group token)</label>
+      <input id="exits" class="mono"></div>
+    <div><label for="windowDays">Cascade window (days)</label><input id="windowDays" type="number" min="1"></div>
+    <div><label for="costBps">Cost per side (bps)</label><input id="costBps" type="number" min="0" step="0.5"></div>
+    <div><label for="sort">Rank by</label>
+      <select id="sort">
+        <option value="cagr">CAGR</option><option value="return">total return</option>
+        <option value="drawdown">max drawdown</option><option value="trades">fewest trades</option>
+        <option value="winrate">win rate</option>
+      </select></div>
+    <div><label for="top">Rows shown</label>
+      <select id="top"><option value="15">15</option><option value="30">30</option>
+        <option value="60">60</option><option value="0">all</option></select></div>
+  </div>
+
+  <div class="rowline">
+    <button id="runBtn" class="primary">Run</button>
+    <span class="muted">Presets:</span>
+    <button data-preset='{"entries":"degrees","exits":"degrees","interval":"daily","maPeriods":""}'>degree grid</button>
+    <button data-preset='{"entries":"multis","exits":"multis","interval":"daily","maPeriods":""}'>雙重/三重/四重</button>
+    <button data-preset='{"entries":"cross:sma20/sma60","exits":"price:sma20","interval":"daily","maPeriods":""}'>golden cross → lose月線</button>
+    <button data-preset='{"entries":"all","exits":"all","interval":"daily","maPeriods":""}'>everything</button>
+    <button data-preset='{"interval":"weekly","maPeriods":"","entries":"degrees","exits":"multis"}'>weekly bars</button>
+    <span class="muted" id="status"></span>
+  </div>
+
+  <details>
+    <summary>Rule reference</summary>
+    <p><code>degreeN</code> — the fastest N adjacent MA pairs have all crossed within the
+      cascade window (cumulative from the short end).<br>
+    <code>multiN</code> — <b>any</b> N distinct adjacent pairs have crossed within the window
+      (雙重/三重/四重突破・跌破). Aliases <code>double</code>, <code>triple</code>, <code>quad</code>.
+      Every degreeN is a multiN, not the reverse.<br>
+    <code>cross:sma20/sma60</code> — that MA pair crossing.
+    <code>price:sma20</code> — adjusted close crossing that MA.
+    <code>align</code> — the whole stack flips to 多頭排列 / 空頭排列.
+    <code>slope:sma240</code> — that MA's own slope turning.<br>
+    Group tokens: <code>degrees</code>, <code>multis</code>, <code>crosses</code>,
+      <code>prices</code>, <code>slopes</code>, <code>all</code>. Entry rules are read upward,
+      exit rules downward.</p>
+  </details>
+
+  <div id="summary" class="pad"></div>
+  <div class="muted">Embedded history: <span id="dataSpan"></span></div>
+
+  <div class="cols">
+    <div>
+      <h2>Strategy grid</h2>
+      <div id="grid" class="scroll"></div>
+    </div>
+    <div>
+      <h2>Selected cell</h2>
+      <div id="cellInfo" class="muted pad"></div>
+      <div class="chartbox">
+        <div class="legend">Equity curve — strategy vs buy &amp; hold; ● entry fill, ● exit fill.
+          Log scale when the range is wide.</div>
+        <div class="tip"></div><div id="equity"></div>
+      </div>
+      <div class="chartbox">
+        <div class="legend">Adjusted close with the MA ladder, and the same fills.</div>
+        <div class="tip"></div><div id="price"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="warn" style="margin-top:18px;">
+    <b>These results are in-sample.</b> Sweeping a grid and reading off the best row is
+    hindsight selection, and a bigger grid makes that worse, not better — with
+    <code>all × all</code> you are picking the luckiest of hundreds of tries over one
+    fixed history. Read the buy-and-hold row and the “beat buy &amp; hold” count, not the
+    top line alone. Fills are the next bar's split/dividend-adjusted open, long-only,
+    one position at a time, net of the per-side cost. Personal monitoring only — not
+    investment advice.
+  </div>
+</div>
+
+<script>window.__PM_DATA__ = {{ payload_json|safe }};</script>
+<script>{{ engine_js|safe }}</script>
+<script>{{ ui_js|safe }}</script>
+</body>
+</html>

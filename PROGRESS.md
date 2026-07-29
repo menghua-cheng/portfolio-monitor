@@ -105,6 +105,20 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
 `tracker.index_days`, `cache.overlap_days`. New console scripts:
 `portfolio-monitor-cache`, `portfolio-monitor-tracker`.
 
+## Session 9 (2026-07-30) — interactive standalone explorer
+
+| Step | Feature | Status | Verification gate |
+|------|---------|--------|-------------------|
+| 33 | JS engine port (`static/engine.js`) | verified | Second implementation of `backtest.py` + `rules.py` so a static HTML file can recompute without a server (ADR-0009). Covers all three intervals, both MA families, all six rule families, the warm-up/clamp/end-snap window logic, next-adjusted-open fills, and the full metric set. Reproduces the pandas semantics that would otherwise silently diverge: Mon..Sun weeks, SMA null until `period`, EMA `adjust=False` recursing from x[0] but null until `period`, bars keeping the last real date in their bucket. Pair window masks are memoized as in Python, so a 484-cell grid stays fast. |
+| 34 | Python/JS parity harness | verified | `explorer.PARITY_SPECS` (14 specs) drives BOTH engines over one **rounded** payload — the exact numbers the browser sees, since comparing unrounded data would hide a real divergence — and `tests/js/parity_runner.js` runs the JS side under node. Every metric of every cell must agree to **1e-9**. Matrix covers all intervals, ema, a custom ladder, every rule family, an explicit window, a clamped start, both out-of-range windows, and non-default cost/window/lookback/threshold; a meta-test asserts the matrix still mentions every family so coverage can't silently shrink. **Passed on the first run, all 14 specs.** Node is not a project dependency, so the test skips without it — an accepted gap, documented in ADR-0009 and partly covered by the page self-check. |
+| 35 | Standalone HTML explorer | verified | `portfolio-monitor-backtest --html [PATH] [--html-years N]`. One file, no server, no network, opens from `file://`. Controls for ticker/interval/ladder/MA family/start/end/entry/exit/window/cost/ranking, five presets, click-a-row equity curve vs buy & hold with entry+exit fills, price chart with the MA ladder, hand-rolled SVG charts with hover crosshair (plotly would have added ~3.7MB to a file whose value is portability). A `test_render_html_is_self_contained` check asserts **no** external loader — script src, link, img, iframe, @import, fetch, XHR, WebSocket, dynamic import — and that the only absolute URLs are XML namespaces. **Live: 3 tickers × 6 years = 221 KB.** |
+| 36 | Page self-check | verified | Every generated page embeds Python's results for its default spec and re-runs them on load, showing a green or red banner, so a file opened after the Python side moves on still states whether it can be trusted. **Runtime-verified in headless Chrome: banner green, "16 cells verified", grid computed in 4 ms.** |
+| 37 | Runtime interaction + cross-check | verified | Drove the real controls in headless Chrome (interval→weekly, entry `multis,degree1`, exit `cross:sma4/sma13`, start 2021-06-01, cost 30bps) and dumped the resulting DOM: ladder auto-switched to 4/13/26/52/104, start **clamped to 2022-07-22 (MA warm-up)** exactly as Python does, 4 cells / 2 traded, equity chart 2 paths, price chart 6 paths, self-check still green. Then re-ran that identical spec through the **Python** engine on the identical embedded payload: window `2022-07-22 → 2026-07-29 (211 weekly bars)`, B&H `+125.6% (+22.4% CAGR)`, `degree1 × cross:sma4/sma13` `+62.7% / CAGR +12.9% / DD -24.5% / 9 trades / 56% win` — **identical to the browser on every figure, including the clamp note**. Equity-curve path (not parity-coverable, since Python exposes no curve) tested against the metrics it must agree with. |
+
+276 tests pass (251 → 276). New design doc: `docs/adr/0009-interactive-explorer-duplicates-the-engine-in-js.md`.
+New assets: `src/portfolio_monitor/static/{engine.js,ui.js}`, `templates/explorer.html.j2`,
+`tests/js/parity_runner.js`. CONTEXT.md gained *Explorer* and *Parity*.
+
 ## Notes / decisions log
 - 2026-07-22: Project scaffolded. Using **Python 3.11** venv (system python3.14 lacks ensurepip and
   sudo is unavailable; 3.11 also has better prebuilt wheels for the data stack).
@@ -118,6 +132,18 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
   Embedded in the daily report and computed ephemerally, no CLI and no `backtest_results` table by
   design (ADR-0003). The "best" strategy is in-sample/hindsight-selected and labeled as such rather
   than split train/test, since ~2y history barely covers the sma240 warm-up (ADR-0004).
+- 2026-07-30 (session 9): Interactive explorer as a single static HTML file (ADR-0009). The
+  decision that matters is accepting a **second engine implementation** in JavaScript. The
+  alternatives each failed the brief: precomputing grids isn't a backtester (you can re-sort
+  but not re-parameterize); sql.js solves the easy half (data access) for ~1.4MB and still
+  needs a strategy engine; Pyodide avoids duplication entirely but costs 10MB+ and multi-second
+  startup, failing the "static file you can email yourself" test. So duplication was the price,
+  and it is paid with a parity test over a 14-spec matrix at 1e-9 plus an on-load self-check
+  banner in every page — because a drifted engine does not crash, it quietly disagrees with the
+  CLI. Known gap, accepted and documented: the parity test needs node, which is not a project
+  dependency, so it skips on a machine without node. Charts are hand-rolled SVG for the same
+  reason the file exists at all — plotly.js would have added ~3.7MB to an artifact whose whole
+  value is portability, and the interactivity that matters is changing parameters, not zooming.
 - 2026-07-30 (session 8): Three things, one theme — make the stored data do the work.
   (a) **`multiN` joins `degreeN` rather than replacing it** (ADR-0006): the report has tagged
   雙重/三重/四重突破 since Session 2 and it was the one signal the backtest couldn't evaluate,

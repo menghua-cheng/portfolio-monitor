@@ -68,21 +68,25 @@ The report is bilingual; the top-right control switches between English and
    crosses, price-vs-MA, stack alignment, MA slope). Prints the grid ranked by any
    metric, with buy-and-hold for the same window. See
    [Exploring backtests](#exploring-backtests).
-8. Performance & signal tracker (`portfolio-monitor-tracker`, also written by every
+8. Interactive explorer: `portfolio-monitor-backtest --html` writes **one static HTML
+   file** that recomputes backtests in your browser — change the window, interval,
+   MA ladder or rules and the grid re-runs locally in milliseconds. No server, no
+   network, works from `file://`. See [Interactive explorer](#interactive-explorer).
+9. Performance & signal tracker (`portfolio-monitor-tracker`, also written by every
    daily run): per-ticker and equal-weight-portfolio total returns over
    1D/1W/1M/3M/6M/1Y/YTD, distance off the 52-week high, an equal-weight index
    sparkline, and every recorded signal with what price did *since* it fired plus a
    directional hit rate. See [Performance & signal tracker](#performance--signal-tracker).
-9. Incremental price cache: SQLite is the source of truth, so a run downloads only
+10. Incremental price cache: SQLite is the source of truth, so a run downloads only
    bars newer than what it holds instead of re-pulling all history from Yahoo and
    Tiingo every time. A **stock split** silently rewrites historical closes
    upstream, so each sync re-checks a small overlap and rescales the stored history
    rather than appending a fake 75% crash onto it. See
    [Price cache](#price-cache).
-10. Email: Gmail SMTP with the chart inlined as a PNG. Dry-run by default (writes
+11. Email: Gmail SMTP with the chart inlined as a PNG. Dry-run by default (writes
    an `.eml` for inspection). With `--send`, if SMTP is not configured the email
    step is skipped rather than failing, so a cron job stays green.
-11. Storage: SQLite at `data/portfolio.db`, all writes idempotent.
+12. Storage: SQLite at `data/portfolio.db`, all writes idempotent.
 
 ## Requirements
 
@@ -288,6 +292,43 @@ Other flags: `--sort cagr|return|drawdown|trades|winrate`, `--top N` (`0` = all)
 > Every run prints the buy-and-hold row and how many cells beat it — read those,
 > not the top line alone. See `docs/adr/0004` and `docs/adr/0005`.
 
+## Interactive explorer
+
+One static HTML file that runs the backtester in your browser:
+
+```bash
+uv run portfolio-monitor-backtest --html                      # reports/backtest-explorer-<date>.html
+uv run portfolio-monitor-backtest --html ~/bt.html --html-years 6
+uv run portfolio-monitor-backtest AAPL MSFT --html            # embed only these tickers
+```
+
+Open it from disk — no server, no network, nothing to install. The price history is
+embedded as JSON and the engine is inlined, so every control recomputes locally:
+ticker, bar interval, MA ladder, MA family, start/end dates, entry and exit rules,
+cascade window, per-side cost, ranking and row count. Click any grid row for its
+equity curve (vs buy & hold, with entry/exit fills marked) and the price chart with
+the MA ladder. A typical 16-cell grid over 1,200 daily bars recomputes in ~5 ms.
+
+`--html-years N` trims the embedded history, since a 14-year cache shouldn't force a
+14-year file. Three tickers × 6 years is about 220 KB.
+
+**How it can be wrong, and what stops it.** The browser engine is a *second*
+implementation of the Python one (a JS port — see `docs/adr/0009` for why not
+sql.js or Pyodide). Two engines can drift, and a drifted page doesn't crash, it just
+disagrees with the CLI. So:
+
+- `tests/test_explorer.py` drives **both** engines from one spec matrix over the same
+  rounded payload and requires agreement to 1e-9 on every metric of every cell —
+  across all three intervals, both MA families, every rule family and the edge-case
+  windows. It needs `node`; without node it skips, which means the guard is off.
+- Every generated page embeds Python's results for its default spec and re-checks
+  them on load, showing a green or red banner at the top. If you ever see the red
+  one, regenerate the file and trust the CLI instead.
+
+> Hindsight selection is *worse* here than on the CLI, because sweeping `all × all`
+> is one click. The in-sample caveat and the "beat buy & hold" count stay on screen
+> for that reason.
+
 ## Performance & signal tracker
 
 Every daily run writes `reports/tracker-<date>.html` alongside the main report. The
@@ -415,11 +456,14 @@ config/settings.yaml         program settings (tracked)
 config/portfolio.example.csv example watchlist (tracked)
 config/portfolio.csv         your watchlist (gitignored)
 src/portfolio_monitor/       config, db, fetch, cache, indicators, signals, charts,
-                             bars, rules, backtest, backtest_cli, tracker,
-                             tracker_report, tracker_cli, report, email_sender,
-                             pipeline
+                             bars, rules, backtest, backtest_cli, explorer,
+                             tracker, tracker_report, tracker_cli, report,
+                             email_sender, pipeline
+src/portfolio_monitor/static/  engine.js (JS port of the backtest engine), ui.js
 templates/report.html.j2     daily report template
 templates/tracker.html.j2    tracker report template
+templates/explorer.html.j2   interactive explorer template
+tests/js/parity_runner.js    drives engine.js under node for the parity test
 CONTEXT.md                   domain glossary (ubiquitous language)
 docs/adr/                    architecture decision records
 docs/plans/                  implementation plans

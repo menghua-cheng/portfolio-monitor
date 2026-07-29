@@ -92,3 +92,31 @@ Do this *after* the feature works, and do not skip it: the intuition was wrong t
 ## Phase 5 — docs
 README (What it does, Configuration table, two new sections, Layout), PROGRESS.md (steps,
 gates, test count, decisions log), CONTEXT.md glossary, ADR-0006/0007/0008, this plan.
+
+
+---
+
+## Follow-on: the interactive standalone explorer
+
+Same repo, next request: "an interactive HTML backtester, no web service, just a static
+file". Delivered as `portfolio-monitor-backtest --html`; see `docs/adr/0009` for the
+options weighed (precomputed grids / sql.js / Pyodide / a JS port).
+
+The design work is almost entirely about the one unavoidable cost — a **second engine
+implementation** — so the plan is short and the guards are the substance:
+
+1. `static/engine.js`: port `backtest.py` + `rules.py`. The subtle parts are the pandas
+   semantics, not the trading logic: Mon..Sun weeks, SMA/EMA null until `period`
+   observations, EMA `adjust=False` recursing from `x[0]`, bars keeping the last real date
+   in their bucket. Pin each one with a direct test, not only through the grid.
+2. Parity harness **before** any UI. Drive both engines from one spec matrix over the
+   *rounded* payload the browser will actually see — comparing against unrounded data would
+   leave a real divergence invisible — and demand 1e-9 on every metric of every cell. Add a
+   meta-test asserting the matrix still names every rule family, so coverage cannot shrink
+   silently. Getting this green first means the UI is then only a rendering problem.
+3. UI: hand-rolled SVG, no charting library. The file's value is portability.
+4. Page self-check: embed Python's answers for the default spec and re-run them on load.
+   The parity test protects the repo; this protects a file someone opens next year.
+5. Assert self-containment mechanically — no script src / link / img / iframe / @import /
+   fetch / XHR / WebSocket / dynamic import, and no absolute URL that isn't an XML
+   namespace. "It looked fine offline" is not a test.
