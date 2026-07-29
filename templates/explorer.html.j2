@@ -138,6 +138,14 @@
     <div>
       <h2>Selected cell</h2>
       <div id="cellInfo" class="muted pad"></div>
+{%- if plotly_js %}
+      <div class="chartbox">
+        <div class="legend">Equity (strategy vs buy &amp; hold) over price and the MA ladder,
+          on a <b>shared x-axis</b> — drag to zoom, scroll to zoom, double-click to reset;
+          both panels move together. ▲ entry fill, ▼ exit fill. Log scale when the range is wide.</div>
+        <div id="plotly"></div>
+      </div>
+{%- else %}
       <div class="chartbox">
         <div class="legend">Equity curve — strategy vs buy &amp; hold; ● entry fill, ● exit fill.
           Log scale when the range is wide.</div>
@@ -147,6 +155,7 @@
         <div class="legend">Adjusted close with the MA ladder, and the same fills.</div>
         <div class="tip"></div><div id="price"></div>
       </div>
+{%- endif %}
     </div>
   </div>
 
@@ -162,6 +171,10 @@
 </div>
 
 <script>window.__PM_DATA__ = {{ payload_json|safe }};</script>
+{%- if plotly_js %}
+{#- plotly.js inlined (not a CDN tag) so the file still works offline from file://. -#}
+{{ plotly_js|safe }}
+{%- endif %}
 <script>{{ engine_js|safe }}</script>
 <script>{{ ui_js|safe }}</script>
 </body>

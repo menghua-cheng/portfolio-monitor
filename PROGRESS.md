@@ -115,9 +115,12 @@ for AAPL/MSFT/NVDA. Live email send is the only step requiring user action (Gmai
 | 36 | Page self-check | verified | Every generated page embeds Python's results for its default spec and re-runs them on load, showing a green or red banner, so a file opened after the Python side moves on still states whether it can be trusted. **Runtime-verified in headless Chrome: banner green, "16 cells verified", grid computed in 4 ms.** |
 | 37 | Runtime interaction + cross-check | verified | Drove the real controls in headless Chrome (interval→weekly, entry `multis,degree1`, exit `cross:sma4/sma13`, start 2021-06-01, cost 30bps) and dumped the resulting DOM: ladder auto-switched to 4/13/26/52/104, start **clamped to 2022-07-22 (MA warm-up)** exactly as Python does, 4 cells / 2 traded, equity chart 2 paths, price chart 6 paths, self-check still green. Then re-ran that identical spec through the **Python** engine on the identical embedded payload: window `2022-07-22 → 2026-07-29 (211 weekly bars)`, B&H `+125.6% (+22.4% CAGR)`, `degree1 × cross:sma4/sma13` `+62.7% / CAGR +12.9% / DD -24.5% / 9 trades / 56% win` — **identical to the browser on every figure, including the clamp note**. Equity-curve path (not parity-coverable, since Python exposes no curve) tested against the metrics it must agree with. |
 
-276 tests pass (251 → 276). New design doc: `docs/adr/0009-interactive-explorer-duplicates-the-engine-in-js.md`.
+| 38 | plotly.js charts with real zoom | verified | Requested follow-up: the first cut shipped SVG-only, arguing zoom wasn't worth plotly's weight; the user asked for zoom, which settles it. plotly.js is now inlined by default and `--svg-charts` keeps the lean build. Equity and price are two subplots on a **shared x-axis** (`xaxis.matches:'x2'`) — the coupling is the actual point, since "what was price doing during that drawdown?" needs both panels to move together. Adds drag/scroll zoom, pan, 6m/1y/3y/all range buttons (placed in the inter-panel gap so they read as belonging to the shared axis), unified hover, ▲/▼ fill markers with per-trade hover text, and PNG export. One `ui.js` serves both builds via a runtime `window.Plotly` guard. **Measured: 4.85 MB vs 0.22 MB (22x)** — only the full 4.63 MB bundle ships with the Python package, so there is no middle size without a JS build step. **Runtime-verified in headless Chrome with all DNS blackholed** (`--host-resolver-rules=MAP * ~NOTFOUND`): 12 traces drawn, 7 modebar buttons, 4 range buttons, 42 fill markers, self-check green, and a programmatic zoom of the price panel moved the equity panel to the *identical* range (`ZOOM_CHANGED=true AXES_COUPLED=true`), with autorange restoring. 10 new tests, two of them Chrome-gated. **The self-containment test had to change shape:** with a 4.6 MB third-party bundle inlined, "no `fetch(` anywhere" is unachievable (plotly carries map/topojson paths scatter never touches), so the static scan is now scoped to code we wrote and the real claim is tested behaviourally by loading offline. |
+
+286 tests pass (251 → 286). New design doc: `docs/adr/0009-interactive-explorer-duplicates-the-engine-in-js.md`.
 New assets: `src/portfolio_monitor/static/{engine.js,ui.js}`, `templates/explorer.html.j2`,
-`tests/js/parity_runner.js`. CONTEXT.md gained *Explorer* and *Parity*.
+`tests/js/parity_runner.js`. CONTEXT.md gained *Explorer* and *Parity*. ADR-0009 amended
+in place for the chart-renderer reversal (it had claimed "no pan/zoom" as a consequence).
 
 ## Notes / decisions log
 - 2026-07-22: Project scaffolded. Using **Python 3.11** venv (system python3.14 lacks ensurepip and
@@ -142,8 +145,15 @@ New assets: `src/portfolio_monitor/static/{engine.js,ui.js}`, `templates/explore
   banner in every page — because a drifted engine does not crash, it quietly disagrees with the
   CLI. Known gap, accepted and documented: the parity test needs node, which is not a project
   dependency, so it skips on a machine without node. Charts are hand-rolled SVG for the same
-  reason the file exists at all — plotly.js would have added ~3.7MB to an artifact whose whole
-  value is portability, and the interactivity that matters is changing parameters, not zooming.
+  reason the file exists at all — but that call was **reversed on request**: plotly.js is now
+  inlined by default (4.85MB vs 0.22MB, with `--svg-charts` keeping the lean build), because
+  zooming into a drawdown is a thing you genuinely want and the two panels sharing an x-axis is
+  what makes it useful. ADR-0009 was amended in place rather than superseded — one clause of a
+  consequences list flipped, and a whole new ADR for that would bury the unchanged reasoning.
+  Side effect worth remembering: inlining a large third-party bundle *broke the shape of the
+  self-containment test*. "Contains no `fetch(`" is unachievable once plotly is embedded, so the
+  static scan is now scoped to our own code and the real property — makes no network requests —
+  is tested by loading the page in Chrome with DNS blackholed.
 - 2026-07-30 (session 8): Three things, one theme — make the stored data do the work.
   (a) **`multiN` joins `degreeN` rather than replacing it** (ADR-0006): the report has tagged
   雙重/三重/四重突破 since Session 2 and it was the one signal the backtest couldn't evaluate,

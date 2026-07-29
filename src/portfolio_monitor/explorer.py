@@ -166,12 +166,20 @@ def parity_fixture(bars: dict, specs: list[dict] | None = None) -> dict:
 # --------------------------------------------------------------------------- #
 # Page assembly
 # --------------------------------------------------------------------------- #
+# Chart renderers. "plotly" inlines plotly.js (~4.6MB) and gives real zoom/pan on a
+# shared x-axis; "svg" keeps the hand-rolled charts and the file at ~220KB. Plotly is
+# the default because zooming into a drawdown is the thing you actually want to do
+# with a backtest; `--svg-charts` exists for when portability matters more.
+CHART_MODES = ("plotly", "svg")
+
+
 @dataclass
 class ExplorerData:
     generated: str
     tickers: list[dict]          # [{symbol, name, bars, span}]
     defaults: dict               # the initial spec the page opens on
     selfcheck: dict              # {symbol, spec, expected} for the on-load parity check
+    charts: str = "plotly"
 
 
 def _asset(name: str) -> str:
@@ -179,7 +187,7 @@ def _asset(name: str) -> str:
 
 
 def build_data(conn, cfg, symbols: list[str] | None = None,
-               max_years: int | None = None) -> ExplorerData:
+               max_years: int | None = None, charts: str = "plotly") -> ExplorerData:
     """Collect the embedded payload: one bars object per watchlist ticker.
 
     `max_years` trims how much history is embedded — the whole point of the file is
@@ -219,10 +227,21 @@ def build_data(conn, cfg, symbols: list[str] | None = None,
     expected = result_payload(backtest.run_spec(
         payload_to_frame(payloads[0]["bars"]), payloads[0]["symbol"],
         spec_from_js(check_spec)))
+    if charts not in CHART_MODES:
+        raise ValueError(f"charts must be one of {CHART_MODES}, got {charts!r}")
     return ExplorerData(
         generated=date.today().isoformat(), tickers=payloads, defaults=defaults,
         selfcheck={"symbol": payloads[0]["symbol"], "spec": check_spec, "expected": expected},
+        charts=charts,
     )
+
+
+def plotly_script() -> str:
+    """plotly.js wrapped in a <script> tag, inlined so the page still works from a
+    file:// URL with no network. Reuses the same bundle the daily report inlines."""
+    from .charts import plotly_js_script
+
+    return plotly_js_script()
 
 
 def render_html(data: ExplorerData) -> str:
@@ -232,16 +251,18 @@ def render_html(data: ExplorerData) -> str:
         generated=data.generated,
         engine_js=_asset("engine.js"),
         ui_js=_asset("ui.js"),
+        plotly_js=plotly_script() if data.charts == "plotly" else "",
         payload_json=json.dumps(
-            {"tickers": data.tickers, "defaults": data.defaults, "selfcheck": data.selfcheck},
+            {"tickers": data.tickers, "defaults": data.defaults,
+             "selfcheck": data.selfcheck, "charts": data.charts},
             separators=(",", ":"), allow_nan=False),
     )
 
 
 def write_html(conn, cfg, out: Path | None = None, symbols: list[str] | None = None,
-               max_years: int | None = None) -> tuple[Path, int]:
+               max_years: int | None = None, charts: str = "plotly") -> tuple[Path, int]:
     """Build and save the explorer. Returns (path, bytes)."""
-    data = build_data(conn, cfg, symbols=symbols, max_years=max_years)
+    data = build_data(conn, cfg, symbols=symbols, max_years=max_years, charts=charts)
     path = out or (REPORTS_DIR / f"backtest-explorer-{data.generated}.html")
     path.parent.mkdir(parents=True, exist_ok=True)
     html = render_html(data)

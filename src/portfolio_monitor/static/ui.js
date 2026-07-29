@@ -1,10 +1,18 @@
 /* Interactive explorer UI (feature: 互動回測).
  *
- * Controls -> spec -> PM.runSpec -> table + charts, all client-side. Charts are
- * hand-rolled SVG rather than a charting library: inlining plotly.js would add
- * ~3.7MB to a file whose whole point is being portable, and the interactivity that
- * matters in a backtester is changing the parameters, not zooming the axes. Hover
- * readout is a crosshair plus one absolutely-positioned tooltip.
+ * Controls -> spec -> PM.runSpec -> table + charts, all client-side.
+ *
+ * Two chart renderers, chosen at generation time and reported in `DATA.charts`:
+ *
+ *   'plotly' (default) — plotly.js inlined, giving drag/scroll zoom, pan, range
+ *      buttons and unified hover. Equity and price are two subplots on a SHARED
+ *      x-axis, so zooming either one zooms both: the question you actually ask of a
+ *      backtest is "what was price doing during that drawdown?". Costs ~4.6MB.
+ *   'svg' — the hand-rolled fallback: one crosshair and a tooltip, no zoom, but the
+ *      whole file stays ~220KB. For emailing yourself a backtest.
+ *
+ * The SVG path is also the runtime fallback if plotly is somehow absent, so one
+ * ui.js serves both builds.
  *
  * Every number shown is computed here from the embedded bars; nothing is
  * precomputed except the self-check block, whose only job is to prove this engine
@@ -238,14 +246,125 @@
     renderCharts();
   }
 
+  // --- plotly charting ----------------------------------------------------
+  function usePlotly() {
+    return DATA.charts !== 'svg' && typeof window.Plotly !== 'undefined';
+  }
+
+  /* One figure, two subplots, one shared x-axis. `matches` is what couples the
+     zoom: drag on either panel and both follow, which is the whole reason to pay
+     plotly's weight rather than draw two independent SVGs. */
+  function plotlyCharts(c) {
+    var host = $('plotly');
+    var eqLog = Math.max.apply(null, c.equity) / Math.min.apply(null, c.equity) > 20;
+    var prLog = Math.max.apply(null, c.close) / Math.min.apply(null, c.close) > 20;
+
+    function markerTrace(list, which, yvals, axis, name, color, symbol) {
+      var xs = [], ys = [], txt = [];
+      list.forEach(function (t) {
+        var i = which === 'enter' ? t.enter : t.exit;
+        if (i === undefined || i === null) return;
+        xs.push(c.dates[i]); ys.push(yvals[i]);
+        var price = which === 'enter' ? t.enterPrice : t.exitPrice;
+        txt.push((which === 'enter' ? 'Entry fill' : 'Exit fill') + ' ' + c.dates[i] +
+                 (price !== undefined ? '<br>at ' + price.toFixed(2) : '') +
+                 (which === 'exit' && t.ret !== undefined ? '<br>trade ' + pct(t.ret) : ''));
+      });
+      return {
+        x: xs, y: ys, mode: 'markers', type: 'scatter', name: name,
+        xaxis: axis.x, yaxis: axis.y, hoverinfo: 'text', text: txt,
+        showlegend: false, legendgroup: which,
+        marker: { color: color, size: 9, symbol: symbol,
+                  line: { color: '#fff', width: 1 } }
+      };
+    }
+
+    var eqAxis = { x: 'x', y: 'y' }, prAxis = { x: 'x2', y: 'y2' };
+    var traces = [
+      { x: c.dates, y: c.equity, type: 'scatter', mode: 'lines', name: 'strategy',
+        line: { color: ACCENT, width: 2 }, xaxis: 'x', yaxis: 'y',
+        hovertemplate: 'strategy %{y:,.0f}<extra></extra>' },
+      { x: c.dates, y: c.buyHold, type: 'scatter', mode: 'lines', name: 'buy & hold',
+        line: { color: MUTED, width: 1.3, dash: 'dot' }, xaxis: 'x', yaxis: 'y',
+        hovertemplate: 'buy &amp; hold %{y:,.0f}<extra></extra>' },
+      markerTrace(c.trades, 'enter', c.equity, eqAxis, 'entry', UP, 'triangle-up'),
+      markerTrace(c.trades, 'exit', c.equity, eqAxis, 'exit', DOWN, 'triangle-down'),
+      { x: c.dates, y: c.close, type: 'scatter', mode: 'lines', name: 'adj close',
+        line: { color: '#1f2933', width: 1.5 }, xaxis: 'x2', yaxis: 'y2',
+        hovertemplate: 'close %{y:,.2f}<extra></extra>' }
+    ];
+    var palette = ['#e8833a', '#1d6fb8', '#8e44ad', '#16a085', '#c0392b'];
+    Object.keys(c.ma).forEach(function (k, i) {
+      traces.push({ x: c.dates, y: c.ma[k], type: 'scatter', mode: 'lines', name: k,
+                    line: { color: palette[i % palette.length], width: 1 },
+                    xaxis: 'x2', yaxis: 'y2',
+                    hovertemplate: k + ' %{y:,.2f}<extra></extra>' });
+    });
+    traces.push(markerTrace(c.trades, 'enter', c.close, prAxis, 'entry', UP, 'triangle-up'));
+    traces.push(markerTrace(c.trades, 'exit', c.close, prAxis, 'exit', DOWN, 'triangle-down'));
+
+    var layout = {
+      height: 560, margin: { l: 58, r: 14, t: 34, b: 40 },
+      hovermode: 'x unified',
+      dragmode: 'zoom',
+      showlegend: true,
+      legend: { orientation: 'h', y: 1.14, x: 0, font: { size: 11 } },
+      font: { family: '-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif', size: 11 },
+      paper_bgcolor: '#fff', plot_bgcolor: '#fff',
+      xaxis: {                                  // equity panel: follows the price panel
+        domain: [0, 1], anchor: 'y', matches: 'x2', showticklabels: false,
+        showgrid: true, gridcolor: '#eef1f4', type: 'date'
+      },
+      yaxis: {
+        domain: [0.56, 1], anchor: 'x', title: { text: 'equity', font: { size: 11 } },
+        type: eqLog ? 'log' : 'linear', gridcolor: '#eef1f4', tickformat: ',.0f'
+      },
+      xaxis2: {
+        domain: [0, 1], anchor: 'y2', type: 'date',
+        showgrid: true, gridcolor: '#eef1f4',
+        rangeselector: {
+          buttons: [
+            { count: 6, label: '6m', step: 'month', stepmode: 'backward' },
+            { count: 1, label: '1y', step: 'year', stepmode: 'backward' },
+            { count: 3, label: '3y', step: 'year', stepmode: 'backward' },
+            { step: 'all', label: 'all' }
+          ],
+          // Sits in the gap between the two panels (equity domain starts at 0.56,
+          // price ends at 0.42) so it reads as belonging to the shared x-axis rather
+          // than floating loose at the bottom of the container.
+          x: 0, y: 0.47, xanchor: 'left', yanchor: 'bottom',
+          font: { size: 10 }, bgcolor: '#f4f6f8', activecolor: '#d5e3f0'
+        }
+      },
+      yaxis2: {
+        domain: [0, 0.42], anchor: 'x2', title: { text: 'price', font: { size: 11 } },
+        type: prLog ? 'log' : 'linear', gridcolor: '#eef1f4'
+      }
+    };
+    var config = {
+      responsive: true, displaylogo: false, scrollZoom: true,
+      modeBarButtonsToRemove: ['lasso2d', 'select2d', 'toggleSpikelines'],
+      toImageButtonOptions: { filename: 'backtest', scale: 2 }
+    };
+    window.Plotly.react(host, traces, layout, config);
+  }
+
   function renderCharts() {
-    if (!curve) { $('equity').innerHTML = ''; $('price').innerHTML = ''; $('cellInfo').innerHTML = ''; return; }
+    var plotHost = $('plotly');
+    if (!curve) {
+      $('cellInfo').innerHTML = '';
+      if ($('equity')) { $('equity').innerHTML = ''; $('price').innerHTML = ''; }
+      if (plotHost && usePlotly()) window.Plotly.purge(plotHost);
+      return;
+    }
     var r = curve.result;
     $('cellInfo').innerHTML = '<b class="mono">' + r.entry + '</b> → <b class="mono">' + r.exit +
       '</b> &nbsp;·&nbsp; return <b style="color:' + fg(r.totalReturn) + '">' + pct(r.totalReturn) +
       '</b> &nbsp;·&nbsp; CAGR ' + pct(r.cagr) + ' &nbsp;·&nbsp; max DD <span style="color:' + DOWN +
       '">-' + (r.maxDrawdown * 100).toFixed(1) + '%</span> &nbsp;·&nbsp; ' + r.numTrades +
       ' trades, ' + plainPct(r.winRate) + ' win';
+
+    if (usePlotly()) { plotlyCharts(curve); return; }
 
     var markers = [];
     curve.trades.forEach(function (t) {
@@ -393,7 +512,9 @@
         compute();
       });
     });
-    window.addEventListener('resize', function () { renderCharts(); });
+    // Plotly is `responsive: true`, so it resizes itself; only the SVG path needs
+    // a redraw, and redrawing plotly on resize would throw away the user's zoom.
+    if (!usePlotly()) window.addEventListener('resize', function () { renderCharts(); });
 
     selfCheck();
     compute();

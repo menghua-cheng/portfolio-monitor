@@ -19,8 +19,8 @@ either shipping a Python runtime or writing a second engine. Options considered:
   duplication. Rejected: ~10MB+ of runtime plus pandas/numpy, several seconds of startup,
   and it fails the "just a static file you can email yourself" test the request was built
   around.
-- **A JavaScript port of the engine** (chosen). ~220KB total file for 6 years of three
-  tickers, instant startup, works from `file://` offline.
+- **A JavaScript port of the engine** (chosen). Instant startup, works from `file://`
+  offline; 0.22MB with the lean chart renderer, 4.85MB with plotly.js inlined for zoom.
 
 ## The cost, and how it is paid
 
@@ -56,13 +56,34 @@ to cover it.
   `adjust=False` recurses from `x[0]` but is likewise null until `period`; a bar keeps the
   last real trading date in its bucket. `test_js_helpers_match_pandas_semantics` pins each
   one directly rather than only through the grid.
-- Charts are hand-rolled SVG. Inlining plotly.js would add ~3.7MB to a file whose value is
-  portability, and the interactivity that matters here is changing parameters, not zooming
-  axes. The cost is no pan/zoom — hover readout only.
+- **Charts have two renderers, and plotly.js is the default** (amended 2026-07-30; the
+  first cut shipped SVG-only and argued that zoom was not worth the weight — the user asked
+  for zoom, which settles it).
+  - `plotly` — the bundle inlined, giving drag/scroll zoom, pan, range buttons, unified
+    hover and PNG export. Equity and price are two subplots on a **shared x-axis**
+    (`xaxis.matches: 'x2'`), so zooming either one zooms both. That coupling is the real
+    reason to pay the weight: the question you ask of a backtest is "what was price doing
+    during that drawdown?", and two independently-zoomable panels cannot answer it.
+  - `svg` (`--svg-charts`) — the hand-rolled fallback: crosshair and tooltip, no zoom, but
+    the whole file stays ~220KB.
+  The measured cost is **4.85MB vs 0.22MB** — 22x. Only the full plotly bundle (4.63MB)
+  ships with the Python package; the ~1MB `plotly.js-basic` partial bundle is npm-only, so
+  using it would mean a JS build step or a vendored blob. Not worth it here, but that is the
+  lever if the size ever becomes the problem.
+  One `ui.js` serves both builds: the plotly path is guarded by a runtime
+  `window.Plotly` check, so the lean build degrades rather than breaking.
 - The equity curve is computed on demand for the selected cell, never for the whole grid, so
   a 484-cell sweep does not build 484 curves. Python has no public curve API, so parity
   cannot cover it; instead the curve is tested against the metrics it must agree with
   (its own total return, trade count and buy-and-hold).
+- **Self-containment is asserted by behaviour, not by string matching.** Once a 4.6MB
+  third-party bundle is inlined, "the file contains no `fetch(`" stops being achievable —
+  plotly carries map/topojson code paths that scatter traces never touch. So the static scan
+  is scoped to code we wrote (the bundle is subtracted first), and the real claim is tested
+  by loading both builds in headless Chrome with **all DNS blackholed**
+  (`--host-resolver-rules=MAP * ~NOTFOUND`) and requiring the self-check banner to go green.
+  A separate Chrome-gated test performs an actual zoom and asserts both axes moved to the
+  same range, so the shared-axis coupling cannot silently regress.
 - Embedded history is trimmable (`--html-years`) because a 14-year cache should not force a
   14-year page. Hindsight selection (ADR-0004) is *worse* here than on the CLI, since the
   UI makes sweeping `all × all` a single click, so the in-sample caveat and the "N beat buy

@@ -313,24 +313,38 @@ def test_build_data_without_prices_is_an_error(tmp_path):
             explorer.build_data(conn, _cfg([("NONE", "")]))
 
 
-def test_render_html_is_self_contained(seeded):
-    """No resource load of any kind — the file must work from file:// while offline.
+def test_our_own_markup_loads_nothing_external(seeded):
+    """No resource load in code WE wrote — the file must work from file:// offline.
 
-    Checks for things that actually *fetch* (src/href attributes, link tags, network
-    APIs, dynamic import), not for the string "http", since the SVG namespace URI
-    `http://www.w3.org/2000/svg` is an identifier and fetches nothing.
+    Scoped to our own output: the vendored plotly bundle contains strings like
+    `fetch(` for map/topojson code paths that scatter traces never touch, so a
+    whole-file string scan is the wrong assertion for it. Behaviour is covered
+    instead by `test_page_works_with_the_network_blackholed`.
     """
-    html = explorer.render_html(explorer.build_data(seeded, _cfg([("TST", "")])))
-    assert html.startswith("<!doctype html>")
+    data = explorer.build_data(seeded, _cfg([("TST", "")]), charts="plotly")
+    html = explorer.render_html(data)
+    ours = html.replace(explorer.plotly_script(), "")   # drop the vendored bundle
+    assert explorer.plotly_script() not in ours          # ...and confirm it was there
+
     loaders = [r"<script[^>]+\bsrc\s*=", r"<link\b", r"<img\b", r"<iframe\b",
                r"@import\b", r"\bfetch\s*\(", r"XMLHttpRequest", r"WebSocket",
                r"\bimport\s*\(", r"url\s*\(\s*[\'\"]?https?:"]
     for pat in loaders:
-        assert not re.search(pat, html, re.I), f"external loader {pat!r} in a standalone file"
-    # the only absolute URLs allowed are XML namespace identifiers
-    for url in re.findall(r"https?://[^\s\'\")]+", html):
+        assert not re.search(pat, ours, re.I), f"external loader {pat!r} in our own code"
+    for url in re.findall(r"https?://[^\s\'\")]+", ours):
         assert url.startswith("http://www.w3.org/"), f"unexpected absolute URL: {url}"
-    assert "PM.runSpec" in html and "__PM_DATA__" in html
+    assert "PM.runSpec" in ours and "__PM_DATA__" in ours
+
+
+def test_svg_build_contains_no_external_reference_at_all(seeded):
+    """The lean build has no vendored code, so the strict whole-file scan applies."""
+    html = explorer.render_html(explorer.build_data(seeded, _cfg([("TST", "")]),
+                                                    charts="svg"))
+    for pat in [r"<script[^>]+\bsrc\s*=", r"<link\b", r"\bfetch\s*\(",
+                r"XMLHttpRequest", r"WebSocket"]:
+        assert not re.search(pat, html, re.I), pat
+    for url in re.findall(r"https?://[^\s\'\")]+", html):
+        assert url.startswith("http://www.w3.org/")
 
 
 def test_render_html_inlines_both_assets(seeded):
@@ -392,3 +406,144 @@ process.stdout.write(JSON.stringify({{runBars: run.numBars, bh: run.buyHoldRetur
         assert c["maKeys"] == 5, label
         assert abs(c["bhReturn"] - got["bh"]) < 1e-9, label
         assert c["monotonicDates"] and c["finiteEquity"], label
+
+
+# --------------------------------------------------------------------------- #
+# Chart renderers: plotly (zoom) vs svg (lean)
+# --------------------------------------------------------------------------- #
+_CHROME = shutil.which("google-chrome") or shutil.which("chromium") \
+    or shutil.which("chromium-browser")
+needs_chrome = pytest.mark.skipif(_CHROME is None, reason="no chrome/chromium installed")
+
+
+def test_plotly_is_the_default_renderer(seeded):
+    assert explorer.build_data(seeded, _cfg([("TST", "")])).charts == "plotly"
+
+
+def test_unknown_chart_mode_is_rejected(seeded):
+    with pytest.raises(ValueError, match="charts must be one of"):
+        explorer.build_data(seeded, _cfg([("TST", "")]), charts="canvas")
+
+
+def test_plotly_build_inlines_the_bundle_and_svg_build_does_not(seeded):
+    plotly_html = explorer.render_html(
+        explorer.build_data(seeded, _cfg([("TST", "")]), charts="plotly"))
+    svg_html = explorer.render_html(
+        explorer.build_data(seeded, _cfg([("TST", "")]), charts="svg"))
+    # Test for the bundle itself, not the word "Plotly" — ui.js mentions it in both
+    # builds, since the plotly path is guarded by a runtime `window.Plotly` check.
+    bundle = explorer.plotly_script()
+    assert bundle in plotly_html and bundle not in svg_html
+    # The size trade-off is the whole reason both modes exist; assert it holds.
+    assert len(plotly_html) > len(svg_html) * 5
+
+
+def test_each_build_emits_only_its_own_chart_hosts(seeded):
+    plotly_html = explorer.render_html(
+        explorer.build_data(seeded, _cfg([("TST", "")]), charts="plotly"))
+    svg_html = explorer.render_html(
+        explorer.build_data(seeded, _cfg([("TST", "")]), charts="svg"))
+    assert 'id="plotly"' in plotly_html
+    assert 'id="equity"' not in plotly_html and 'id="price"' not in plotly_html
+    assert 'id="equity"' in svg_html and 'id="price"' in svg_html
+    assert 'id="plotly"' not in svg_html
+
+
+def test_payload_tells_the_ui_which_renderer_to_use(seeded):
+    for mode in ("plotly", "svg"):
+        html = explorer.render_html(
+            explorer.build_data(seeded, _cfg([("TST", "")]), charts=mode))
+        assert f'"charts":"{mode}"' in html
+
+
+def test_write_html_honours_the_chart_mode(seeded, tmp_path):
+    _p1, big = explorer.write_html(seeded, _cfg([("TST", "")]),
+                                   out=tmp_path / "big.html", charts="plotly")
+    _p2, small = explorer.write_html(seeded, _cfg([("TST", "")]),
+                                     out=tmp_path / "small.html", charts="svg")
+    assert big > small * 5
+
+
+def test_ui_falls_back_to_svg_when_plotly_is_absent():
+    """One ui.js serves both builds, so the plotly path must be conditional."""
+    ui = (Path(explorer.__file__).parent / "static" / "ui.js").read_text(encoding="utf-8")
+    assert "DATA.charts !== 'svg' && typeof window.Plotly !== 'undefined'" in ui
+    assert "if (usePlotly()) { plotlyCharts(curve); return; }" in ui
+
+
+@needs_chrome
+def test_plotly_page_zooms_both_panels_together_offline(seeded, tmp_path):
+    """The feature this renderer exists for: zoom, with the two panels coupled.
+
+    Runs with DNS blackholed, so it also proves the inlined bundle needs no network.
+    """
+    out = tmp_path / "zoom.html"
+    explorer.write_html(seeded, _cfg([("TST", "")]), out=out, charts="plotly")
+    harness = """
+<script>
+window.addEventListener('load', function () {
+  setTimeout(function () {
+    var gd = document.getElementById('plotly');
+    var res = {};
+    function done() {
+      var d = document.createElement('div');
+      d.id = 'PROBE';
+      d.textContent = 'PROBE' + JSON.stringify(res);
+      document.body.appendChild(d);
+    }
+    try {
+      res.traces = gd.data ? gd.data.length : 0;
+      res.drawn = gd.querySelectorAll('.scatterlayer .trace').length;
+      res.modebar = gd.querySelectorAll('.modebar-btn').length;
+      res.rangesel = gd.querySelectorAll('.rangeselector .button').length;
+      res.markers = gd.querySelectorAll('.scatterlayer .trace .points path').length;
+      res.selfcheck = document.getElementById('selfcheck').className;
+      var before = JSON.stringify(gd._fullLayout.xaxis.range);
+      var mid = gd._fullLayout.xaxis2.range;
+      Plotly.relayout(gd, {'xaxis2.range': [mid[0], mid[1]]}).then(function () {
+        var lo = gd._fullLayout.xaxis2.range[0], hi = gd._fullLayout.xaxis2.range[1];
+        var half = [lo, new Date((new Date(lo).getTime() + new Date(hi).getTime()) / 2)
+                        .toISOString().slice(0, 10)];
+        return Plotly.relayout(gd, {'xaxis2.range': half});
+      }).then(function () {
+        var f = gd._fullLayout;
+        res.zoomChanged = JSON.stringify(f.xaxis.range) !== before;
+        res.coupled = JSON.stringify(f.xaxis.range) === JSON.stringify(f.xaxis2.range);
+        done();
+      }).catch(function (e) { res.error = String(e); done(); });
+    } catch (e) { res.error = String(e); done(); }
+  }, 2500);
+});
+</script>
+"""
+    out.write_text(out.read_text(encoding="utf-8").replace("</body>", harness + "</body>"),
+                   encoding="utf-8")
+    proc = subprocess.run(
+        [_CHROME, "--headless", "--disable-gpu", "--no-sandbox",
+         "--virtual-time-budget=20000", "--host-resolver-rules=MAP * ~NOTFOUND",
+         "--dump-dom", f"file://{out}"],
+        capture_output=True, text=True, timeout=300)
+    m = re.search(r"PROBE(\{.*?\})", proc.stdout)
+    assert m, f"probe never ran; chrome stderr:\n{proc.stderr[-2000:]}"
+    res = json.loads(m.group(1))
+    assert "error" not in res, res["error"]
+    assert res["traces"] >= 7 and res["drawn"] >= 7        # 2 equity + close + MAs + markers
+    assert res["modebar"] >= 5                             # zoom/pan/reset are present
+    assert res["rangesel"] == 4                            # 6m / 1y / 3y / all
+    assert res["markers"] > 0                              # trade fills drawn
+    assert res["zoomChanged"] is True, "zooming did nothing"
+    assert res["coupled"] is True, "panels are not on a shared x-axis"
+    assert "ok-banner" in res["selfcheck"], "self-check failed offline"
+
+
+@needs_chrome
+def test_svg_page_also_renders_offline(seeded, tmp_path):
+    out = tmp_path / "lean.html"
+    explorer.write_html(seeded, _cfg([("TST", "")]), out=out, charts="svg")
+    proc = subprocess.run(
+        [_CHROME, "--headless", "--disable-gpu", "--no-sandbox",
+         "--virtual-time-budget=12000", "--host-resolver-rules=MAP * ~NOTFOUND",
+         "--dump-dom", f"file://{out}"],
+        capture_output=True, text=True, timeout=300)
+    assert "ok-banner" in proc.stdout, "lean build self-check failed offline"
+    assert "<svg" in proc.stdout, "svg charts did not render"

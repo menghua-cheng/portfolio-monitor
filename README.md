@@ -300,17 +300,30 @@ One static HTML file that runs the backtester in your browser:
 uv run portfolio-monitor-backtest --html                      # reports/backtest-explorer-<date>.html
 uv run portfolio-monitor-backtest --html ~/bt.html --html-years 6
 uv run portfolio-monitor-backtest AAPL MSFT --html            # embed only these tickers
+uv run portfolio-monitor-backtest --html --svg-charts         # 0.22 MB, no zoom
 ```
 
 Open it from disk — no server, no network, nothing to install. The price history is
 embedded as JSON and the engine is inlined, so every control recomputes locally:
 ticker, bar interval, MA ladder, MA family, start/end dates, entry and exit rules,
 cascade window, per-side cost, ranking and row count. Click any grid row for its
-equity curve (vs buy & hold, with entry/exit fills marked) and the price chart with
-the MA ladder. A typical 16-cell grid over 1,200 daily bars recomputes in ~5 ms.
+equity curve (vs buy & hold, with ▲ entry / ▼ exit fills marked) and the price chart
+with the MA ladder. A 16-cell grid over 1,200 daily bars recomputes in ~3 ms.
+
+**Charts zoom.** plotly.js is inlined, so you get drag-zoom, scroll-zoom, pan,
+6m/1y/3y/all range buttons, unified hover and PNG export. Equity and price sit on a
+**shared x-axis** — zoom either panel and both follow, which is what you want when
+asking "what was price doing during that drawdown?".
+
+| Build | Size (3 tickers × 6y) | Charts |
+|-------|----------------------|--------|
+| default | ~4.9 MB | plotly.js: zoom, pan, range buttons, unified hover |
+| `--svg-charts` | ~0.22 MB | hand-drawn SVG: hover crosshair only, no zoom |
 
 `--html-years N` trims the embedded history, since a 14-year cache shouldn't force a
-14-year file. Three tickers × 6 years is about 220 KB.
+14-year file. Use `--svg-charts` when portability matters more than zoom (emailing it
+to yourself); only the full 4.63 MB plotly bundle ships with the Python package, so
+there is no middle size available without a JS build step.
 
 **How it can be wrong, and what stops it.** The browser engine is a *second*
 implementation of the Python one (a JS port — see `docs/adr/0009` for why not
@@ -321,6 +334,9 @@ disagrees with the CLI. So:
   rounded payload and requires agreement to 1e-9 on every metric of every cell —
   across all three intervals, both MA families, every rule family and the edge-case
   windows. It needs `node`; without node it skips, which means the guard is off.
+- Both builds are loaded in headless Chrome with **all DNS blackholed** to prove they
+  need no network, and a further test performs a real zoom and asserts both axes
+  landed on the same range. Those skip without Chrome.
 - Every generated page embeds Python's results for its default spec and re-checks
   them on load, showing a green or red banner at the top. If you ever see the red
   one, regenerate the file and trust the CLI instead.

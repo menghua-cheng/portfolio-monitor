@@ -221,6 +221,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--html-years", type=int, metavar="N",
                    help="Trim the history embedded in --html to N years, to keep the "
                         "file portable (default: everything cached).")
+    p.add_argument("--svg-charts", action="store_true",
+                   help="Draw the --html charts as plain SVG instead of inlining "
+                        "plotly.js: no zoom or pan, but ~220KB instead of ~4.9MB.")
     p.add_argument("--list-rules", action="store_true",
                    help="Print the available signal rules and exit.")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -278,12 +281,15 @@ def _cli(argv: list[str] | None = None) -> int:
         syms = [s.upper() for s in args.symbols] or None
         with db.connect() as conn:
             try:
-                path, size = explorer.write_html(conn, cfg, out=out, symbols=syms,
-                                                 max_years=args.html_years)
+                path, size = explorer.write_html(
+                    conn, cfg, out=out, symbols=syms, max_years=args.html_years,
+                    charts="svg" if args.svg_charts else "plotly")
             except RuntimeError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 1
-        print(f"Interactive explorer: {path}  ({size / 1024:.0f} KB, self-contained)")
+        mode = "SVG charts" if args.svg_charts else "plotly.js inlined, zoom/pan"
+        print(f"Interactive explorer: {path}  ({size / 1024 / 1024:.2f} MB, "
+              f"self-contained, {mode})")
         print("Open it in a browser — it recomputes locally, no server needed.")
         return 0
 
