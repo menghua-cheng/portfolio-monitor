@@ -24,6 +24,9 @@ dependencies = [
 #   uv run portfolio-monitor-config add NVDA
 portfolio-monitor = "portfolio_monitor.pipeline:_cli"
 portfolio-monitor-config = "portfolio_monitor.config:_cli"
+portfolio-monitor-backtest = "portfolio_monitor.backtest_cli:_cli"
+portfolio-monitor-cache = "portfolio_monitor.cache:_cli"
+portfolio-monitor-tracker = "portfolio_monitor.tracker_cli:_cli"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]

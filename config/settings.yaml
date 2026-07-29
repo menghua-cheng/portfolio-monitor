@@ -16,5 +16,15 @@ backtest:
   cost_bps: 5
   # Notional capital for the equity curve; percentage metrics are scale-free.
   starting_cash: 10000
+tracker:
+  # How far back the daily performance/signal tracker scores recorded signals.
+  lookback_days: 90
+  # Window for the tracker's equal-weight index sparkline.
+  index_days: 180
+cache:
+  # Calendar days of already-cached bars an incremental sync re-fetches and
+  # compares. Wide enough to survive a holiday week; a split rewrites history
+  # upstream, so this comparison is what catches it before new bars are appended.
+  overlap_days: 12
 data:
   crosscheck_tolerance_pct: 1.0

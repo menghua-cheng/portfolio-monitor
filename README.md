@@ -60,10 +60,29 @@ The report is bilingual; the top-right control switches between English and
    the best strategy is chosen by CAGR and clearly labeled as hindsight-selected,
    not a forward recommendation. Shown as a compact bilingual block under each
    ticker in the report. See `docs/adr/` for the design rationale.
-7. Email: Gmail SMTP with the chart inlined as a PNG. Dry-run by default (writes
+7. Backtest explorer (`portfolio-monitor-backtest`): the same engine, driven from
+   the command line, so you can change the **window** (`--start` / `--end`), the
+   **time scale** (`--interval daily|weekly|monthly`), and **which signals buy and
+   sell** (`--entry` / `--exit`, from a rule registry: N-fold cascades, the
+   雙重/三重/四重突破・跌破 multi-break counts the report tags, single MA pair
+   crosses, price-vs-MA, stack alignment, MA slope). Prints the grid ranked by any
+   metric, with buy-and-hold for the same window. See
+   [Exploring backtests](#exploring-backtests).
+8. Performance & signal tracker (`portfolio-monitor-tracker`, also written by every
+   daily run): per-ticker and equal-weight-portfolio total returns over
+   1D/1W/1M/3M/6M/1Y/YTD, distance off the 52-week high, an equal-weight index
+   sparkline, and every recorded signal with what price did *since* it fired plus a
+   directional hit rate. See [Performance & signal tracker](#performance--signal-tracker).
+9. Incremental price cache: SQLite is the source of truth, so a run downloads only
+   bars newer than what it holds instead of re-pulling all history from Yahoo and
+   Tiingo every time. A **stock split** silently rewrites historical closes
+   upstream, so each sync re-checks a small overlap and rescales the stored history
+   rather than appending a fake 75% crash onto it. See
+   [Price cache](#price-cache).
+10. Email: Gmail SMTP with the chart inlined as a PNG. Dry-run by default (writes
    an `.eml` for inspection). With `--send`, if SMTP is not configured the email
    step is skipped rather than failing, so a cron job stays green.
-8. Storage: SQLite at `data/portfolio.db`, all writes idempotent.
+11. Storage: SQLite at `data/portfolio.db`, all writes idempotent.
 
 ## Requirements
 
@@ -103,10 +122,27 @@ installed, so run modules with `PYTHONPATH=src ./.venv/bin/python -m …` or use
 
 ## Configuration
 
-Program settings are in `config/settings.yaml` (history length, MA periods,
-signal windows, cross-check tolerance, and the backtest's `cost_bps` per-side
-trading cost and `starting_cash`). The watchlist is `config/portfolio.csv`
-(`symbol,name` per row).
+Program settings are in `config/settings.yaml`. The watchlist is
+`config/portfolio.csv` (`symbol,name` per row).
+
+| Key | Meaning |
+|-----|---------|
+| `history_years` | How much history the daily report fetches and works on |
+| `ma_periods` | The MA ladder for the daily report (week…year) |
+| `signals.slope_lookback`, `signals.flat_threshold_pct` | Long-term trend slope classification |
+| `signals.double_window_days` | Window for tagging a second cross as a dual-trend signal |
+| `signals.recent_window_days` | Window for the trend summary and the backtest cascade |
+| `backtest.cost_bps` | Per-side trading cost applied to every backtest fill |
+| `backtest.starting_cash` | Notional capital for the equity curve (metrics are scale-free) |
+| `tracker.lookback_days` | How far back the tracker scores recorded signals (default 90) |
+| `tracker.index_days` | Window for the tracker's equal-weight index sparkline (default 180) |
+| `cache.overlap_days` | Cached bars an incremental sync re-checks for a split/dividend re-basing (default 12) |
+| `data.crosscheck_tolerance_pct` | Allowed yfinance-vs-Tiingo close difference |
+
+The backtest explorer reads the same `backtest` settings as defaults; its window,
+interval, MA ladder and signal rules are per-run flags rather than settings, so
+exploring never means editing a file. Per-interval MA ladders live in
+`src/portfolio_monitor/bars.py` and are overridable with `--ma-periods`.
 
 Secrets go in `.env` (see `.env.example`):
 
@@ -160,9 +196,189 @@ uv run portfolio-monitor --tickers AAPL MSFT
 Outputs:
 
 - `reports/<date>.html` — self-contained interactive report.
+- `reports/tracker-<date>.html` — performance + signal tracker.
 - `reports/<date>.eml` — the email message (dry-run) for inspection.
 - `reports/charts/<TICKER>.png` — per-ticker static charts.
 - `data/portfolio.db` — prices, indicators, signals, run audit.
+
+## Exploring backtests
+
+The daily report shows one hindsight-best strategy per ticker over whatever
+history is on hand. `portfolio-monitor-backtest` is the exploratory counterpart:
+same engine, but you choose the window, the time scale, and the signals.
+
+```bash
+uv run portfolio-monitor-backtest                     # whole watchlist, defaults
+uv run portfolio-monitor-backtest AAPL --top 5        # one ticker, top 5 rows
+uv run portfolio-monitor-backtest --list-rules        # available signals + ladders
+```
+
+**1 — window.** `--start` / `--end` bound the *tradable* window (ISO dates):
+
+```bash
+uv run portfolio-monitor-backtest AAPL --start 2025-09-01 --end 2026-03-31
+```
+
+Moving averages are computed over all loaded history and only then clipped, so a
+chosen start trades on a warm ladder rather than restarting the warm-up. A
+`--start` earlier than the first all-warm bar is clamped, and the output says so.
+Windows older than the stored history need `--refresh` (see below).
+
+**2 — time scale.** `--interval daily|weekly|monthly` aggregates daily bars
+(open=first, high=max, low=min, close=last, volume=sum). MA periods count in
+*bars*, so each interval carries its own ladder — weekly `sma20` would be five
+months, not one:
+
+| interval | default MA ladder | meaning |
+|----------|-------------------|---------|
+| `daily` | 5, 20, 60, 120, 240 | week, month, quarter, half-year, year |
+| `weekly` | 4, 13, 26, 52, 104 | month, quarter, half-year, year, 2 years |
+| `monthly` | 3, 6, 12, 24, 60 | quarter, half-year, year, 2 years, 5 years |
+
+Override with `--ma-periods 10,50,200` (any length; degrees follow the number of
+adjacent pairs). The slowest line sets the warm-up cost, so coarse intervals need
+much more history than the pipeline stores — fetch it with `--refresh`:
+
+```bash
+uv run portfolio-monitor-backtest AAPL --interval weekly --refresh --years 14
+uv run portfolio-monitor-backtest AAPL --interval monthly --top 4
+```
+
+`--refresh` fetches and upserts into `data/portfolio.db`, so the deeper history
+stays cached for later runs. Without it the explorer reads stored rows only and
+never touches the network.
+
+**3 — signals.** `--entry` and `--exit` take a comma-separated list of rules; the
+grid swept is their product. Entry rules are read upward, exit rules downward:
+
+| rule | fires when |
+|------|-----------|
+| `degreeN` | the fastest N adjacent MA pairs have all crossed within the lookback window |
+| `multiN` | **any** N distinct adjacent pairs have crossed within the window — the 雙重/三重/四重突破・跌破 the report tags. Aliases: `double`, `triple`, `quad` |
+| `cross:sma20/sma60` | that MA pair crosses (a golden / death cross) |
+| `price:sma20` | the adjusted close crosses that MA |
+| `align` | the whole stack flips to 多頭排列 / 空頭排列 |
+| `slope:sma240` | that MA's own slope turns up / down |
+
+`degreeN` and `multiN` are close cousins worth keeping straight: degree demands the
+fastest N pairs *cumulatively from the short end*, multi accepts any N pairs. Every
+degree-N cross is a multi-N cross but not the reverse, so multi fires more often and
+earlier — see `docs/adr/0006`.
+
+Numbers may be bare (`cross:20/60`), and `--ma-kind ema` points the rules at the
+EMA family. Group tokens expand against the active ladder: `degrees`, `multis`,
+`crosses`, `prices`, `slopes`, `all`.
+
+```bash
+# buy on a golden cross, sell when price loses the monthly line
+uv run portfolio-monitor-backtest AAPL --entry cross:sma20/sma60 --exit price:sma20
+
+# sweep everything and rank by drawdown instead of CAGR
+uv run portfolio-monitor-backtest AAPL --entry all --exit all --sort drawdown --top 15
+
+# backtest the report's own 雙重/三重/四重突破 tags
+uv run portfolio-monitor-backtest AAPL --entry multis --exit multis
+```
+
+Other flags: `--sort cagr|return|drawdown|trades|winrate`, `--top N` (`0` = all),
+`--cost-bps`, `--window-days`, `--json` for machine-readable output.
+
+> Results are **in-sample by construction**: sweeping a grid and reading off the
+> best row is hindsight selection, and a bigger grid makes that worse, not better.
+> Every run prints the buy-and-hold row and how many cells beat it — read those,
+> not the top line alone. See `docs/adr/0004` and `docs/adr/0005`.
+
+## Performance & signal tracker
+
+Every daily run writes `reports/tracker-<date>.html` alongside the main report. The
+same thing on demand, in the terminal:
+
+```bash
+uv run portfolio-monitor-tracker                  # table, from the cache (no network)
+uv run portfolio-monitor-tracker --html           # also write the HTML report
+uv run portfolio-monitor-tracker --days 180       # score signals over 180 days
+uv run portfolio-monitor-tracker --sync           # pull new bars first
+uv run portfolio-monitor-tracker --json           # machine-readable
+```
+
+Three sections:
+
+1. **Performance** — per-ticker total return (adjusted, so splits and dividends are
+   never mistaken for performance) over 1D/1W/1M/3M/6M/1Y/YTD, plus distance off the
+   52-week high. The `PORTFOLIO` row is the **equal-weight** mean: the watchlist has
+   no share counts, so equal weight is the only honest reading. A ticker without
+   enough history for a horizon is excluded from it rather than assumed flat, which
+   is why the tickers-counted line under the table matters.
+2. **Equal-weight index** — an inline SVG sparkline of the watchlist normalized to
+   100, built only from tickers covering the whole window.
+3. **Signals and hit rate** — every recorded signal in the lookback window, what the
+   adjusted price has done since it fired, and whether that matched the signal's
+   direction. Signals that make no directional claim are listed but not scored.
+
+> The hit rate is a **tracking** measure, not a strategy result: no entries, exits,
+> position sizing or costs, and every signal is measured to the latest bar, so older
+> signals get a longer runway. It answers "has this ticker's signal flow been
+> pointing the right way lately". For tradability, use the backtest. See
+> `docs/adr/0008`.
+
+## Price cache
+
+`data/portfolio.db` is the source of truth for prices. A run asks Yahoo (and Tiingo)
+only for bars newer than what it already holds, so a daily run downloads a handful of
+rows instead of years of history.
+
+```bash
+uv run portfolio-monitor-cache status      # what's cached, per ticker and source
+uv run portfolio-monitor-cache sync        # pull new bars for the watchlist
+uv run portfolio-monitor-cache sync AAPL --years 15 --force   # deepen the cache
+uv run portfolio-monitor-cache actions     # splits / re-basings that were detected
+```
+
+**Splits are the reason this isn't trivial.** Yahoo's raw close is split-adjusted
+retroactively, so the day after a 4:1 split every historical close it serves is a
+quarter of yesterday's. Appending new bars onto old ones would leave a 75% one-day
+"crash" in the cache that every indicator, signal, backtest and performance figure
+downstream would treat as real.
+
+So each incremental sync re-fetches a small overlap of bars it already has
+(`cache.overlap_days`, default 12 calendar days) and compares them:
+
+| Overlap comparison | What happens |
+|---|---|
+| closes agree | append the new tail — the common case |
+| closes differ by a consistent ratio | **split**: the stored history is rescaled by that ratio (volume inversely), then the tail is appended |
+| closes differ inconsistently | no guessing: the full window is refetched and overwritten |
+| only adjusted closes differ | **dividend adjustment**: same rescale path |
+
+Every rescale is recorded in the `corporate_actions` table with its factor, cutoff and
+row count, and logged at WARNING — a silent bulk price rewrite would otherwise be
+indistinguishable from corruption. Reference (Tiingo/Stooq) history is cached
+separately in `prices_ref`, so the daily cross-check compares two cached series.
+
+The cache is never shrunk: `portfolio-monitor-backtest --refresh --years 14` deepens
+it permanently, while the daily report keeps reading only its `history_years` window.
+See `docs/adr/0007`.
+
+### What it actually saved
+
+Measured on the 3-ticker watchlist. Two things dominated a run, and trimming the
+*payload* of a fetch was not one of them:
+
+| Step | Before | After |
+|------|--------|-------|
+| Data (both sources, per run) | 8.1s | 3.8s while today's bar may still appear; **0.05s** once it is cached |
+| Backtest (16-cell grid × 3 tickers) | 3.1s | **0.22s** |
+| Whole pipeline, wall clock | ~13s | ~7.9s, ~4s once the day's bar is cached |
+
+- **Fetch latency, not payload, was the data cost.** Asking Yahoo for 12 days costs
+  nearly what asking for 2 years costs, so an incremental fetch alone was only ~1.3x
+  faster. The real saving is *not asking at all* when the cache already holds the
+  newest bar that could exist — which is what makes a second run of the day free.
+- **The backtest was recomputing the same work per grid cell.** All 16 cells need the
+  same four per-MA-pair "crossed within the window" masks; they were being rebuilt for
+  every cell, in a per-bar Python loop. Memoizing them per run and vectorizing the
+  window test with `searchsorted` gave ~14x. A 49-cell grid over 13 years of daily
+  bars now runs in 0.4s.
 
 ## Scheduling
 
@@ -198,9 +414,12 @@ uv.lock                      pinned dependency lockfile (uv sync)
 config/settings.yaml         program settings (tracked)
 config/portfolio.example.csv example watchlist (tracked)
 config/portfolio.csv         your watchlist (gitignored)
-src/portfolio_monitor/       config, db, fetch, indicators, signals, charts,
-                             backtest, report, email_sender, pipeline
-templates/report.html.j2     report template
+src/portfolio_monitor/       config, db, fetch, cache, indicators, signals, charts,
+                             bars, rules, backtest, backtest_cli, tracker,
+                             tracker_report, tracker_cli, report, email_sender,
+                             pipeline
+templates/report.html.j2     daily report template
+templates/tracker.html.j2    tracker report template
 CONTEXT.md                   domain glossary (ubiquitous language)
 docs/adr/                    architecture decision records
 docs/plans/                  implementation plans

@@ -33,6 +33,15 @@ _STALENESS_DAYS = 7
 _COLUMNS = ["date", "open", "high", "low", "close", "adj_close", "volume", "source"]
 
 
+def _start_date(years: int, start: str | None) -> str:
+    """The ISO date a fetch should begin at. An explicit `start` wins, so the
+    incremental cache can ask for just the tail instead of re-downloading years
+    of history it already holds."""
+    if start:
+        return str(start)
+    return (date.today() - timedelta(days=int(years * 365.25) + 10)).isoformat()
+
+
 @dataclass
 class CrossCheck:
     ticker: str
@@ -47,11 +56,14 @@ class CrossCheck:
 # --------------------------------------------------------------------------- #
 # Individual sources
 # --------------------------------------------------------------------------- #
-def fetch_yfinance(ticker: str, years: int) -> pd.DataFrame:
-    """Fetch from Yahoo Finance via yfinance. Returns empty DataFrame on failure."""
+def fetch_yfinance(ticker: str, years: int, start: str | None = None) -> pd.DataFrame:
+    """Fetch from Yahoo Finance via yfinance. Returns empty DataFrame on failure.
+
+    `start` overrides the years-back default (used by the incremental cache).
+    """
     import yfinance as yf
 
-    start = (date.today() - timedelta(days=int(years * 365.25) + 10)).isoformat()
+    start = _start_date(years, start)
     try:
         raw = yf.download(ticker, start=start, auto_adjust=False,
                           progress=False, threads=False)
@@ -79,13 +91,13 @@ def fetch_yfinance(ticker: str, years: int) -> pd.DataFrame:
     return out.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
 
 
-def fetch_stooq(ticker: str, years: int) -> pd.DataFrame:
+def fetch_stooq(ticker: str, years: int, start: str | None = None) -> pd.DataFrame:
     """Fetch daily EOD from Stooq via pandas-datareader. Returns empty on failure."""
     from pandas_datareader import data as pdr
 
-    start = date.today() - timedelta(days=int(years * 365.25) + 10)
+    start_dt = pd.Timestamp(_start_date(years, start)).date()
     try:
-        raw = pdr.DataReader(ticker, "stooq", start=start)
+        raw = pdr.DataReader(ticker, "stooq", start=start_dt)
     except Exception as exc:
         # Known-dead paths (unimplemented reader / anti-bot wall) are expected;
         # log at debug to avoid noise on every run.
@@ -109,7 +121,8 @@ def fetch_stooq(ticker: str, years: int) -> pd.DataFrame:
     return out.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
 
 
-def fetch_tiingo(ticker: str, years: int, api_key: str | None = None) -> pd.DataFrame:
+def fetch_tiingo(ticker: str, years: int, api_key: str | None = None,
+                 start: str | None = None) -> pd.DataFrame:
     """Fetch daily EOD from Tiingo (independent cross-check source).
 
     Requires a free API key (TIINGO_API_KEY). Returns empty DataFrame if no key
@@ -119,7 +132,7 @@ def fetch_tiingo(ticker: str, years: int, api_key: str | None = None) -> pd.Data
     if not api_key:
         return pd.DataFrame(columns=_COLUMNS)
 
-    start = (date.today() - timedelta(days=int(years * 365.25) + 10)).isoformat()
+    start = _start_date(years, start)
     url = (f"https://api.tiingo.com/tiingo/daily/{ticker.lower()}/prices"
            f"?startDate={start}&token={api_key}")
     try:
@@ -146,13 +159,13 @@ def fetch_tiingo(ticker: str, years: int, api_key: str | None = None) -> pd.Data
     return out.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
 
 
-def fetch_reference(ticker: str, years: int) -> pd.DataFrame:
+def fetch_reference(ticker: str, years: int, start: str | None = None) -> pd.DataFrame:
     """Best-effort independent source for cross-checking: Tiingo first (if keyed),
     else Stooq. Returns empty DataFrame if none is reachable."""
-    ref = fetch_tiingo(ticker, years)
+    ref = fetch_tiingo(ticker, years, start=start)
     if not ref.empty:
         return ref
-    return fetch_stooq(ticker, years)
+    return fetch_stooq(ticker, years, start=start)
 
 
 # --------------------------------------------------------------------------- #

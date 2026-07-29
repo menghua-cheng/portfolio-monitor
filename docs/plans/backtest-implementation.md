@@ -97,3 +97,18 @@ Follow `test_signals.py`'s synthetic-frame style, but frames include `open`,
 - Warm-up eats history: degree-4 needs `sma240` warm, so a 2-year window leaves
   ~1 year tradable; some (ticker, strategy) cells legitimately have no trades.
 - Compute is trivial at this scale, so ephemeral daily recompute is fine.
+
+---
+
+## Superseded details (2026-07-30, Session 7)
+
+This plan describes the backtest as originally delivered and is still accurate for
+the daily report's path (`backtest.run_backtest`). Two details listed above have
+since changed — see `docs/plans/backtest-explorer.md` and ADR-0005:
+
+- `StrategyResult` no longer stores `entry_degree` / `exit_degree` as fields. It
+  holds two `RuleSpec`s and *exposes* those two as properties (0 when the side
+  isn't a degree rule), so the report's view builder is unaffected.
+- "No CLI" (ADR-0003) applied to the report's backtest and still does. A separate
+  exploratory command, `portfolio-monitor-backtest`, now exists over the same
+  engine.

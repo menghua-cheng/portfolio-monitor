@@ -102,6 +102,22 @@ class Config:
         return float(self.settings.get("backtest", {}).get("cost_bps", 5.0))
 
     @property
+    def tracker_lookback_days(self) -> int:
+        """Signal-tracker lookback: how far back the daily tracker scores signals."""
+        return int(self.settings.get("tracker", {}).get("lookback_days", 90))
+
+    @property
+    def tracker_index_days(self) -> int:
+        """Window for the tracker's equal-weight index sparkline."""
+        return int(self.settings.get("tracker", {}).get("index_days", 180))
+
+    @property
+    def cache_overlap_days(self) -> int:
+        """Calendar days of already-cached bars an incremental sync re-fetches and
+        compares, so a split/dividend re-basing is caught before appending."""
+        return int(self.settings.get("cache", {}).get("overlap_days", 12))
+
+    @property
     def backtest_starting_cash(self) -> float:
         """Notional capital for the backtest equity curve (percentage metrics are
         scale-free, so this only sets the curve's units)."""

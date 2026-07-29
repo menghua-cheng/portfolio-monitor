@@ -15,19 +15,23 @@ import pandas as pd
 PERIODS = {5: "5", 20: "20", 60: "60", 120: "120", 240: "240"}
 
 
-def compute_indicators(prices: pd.DataFrame) -> pd.DataFrame:
+def compute_indicators(prices: pd.DataFrame, periods=None) -> pd.DataFrame:
     """Given a price DataFrame (must contain 'date' and 'close', ascending by
     date), return a DataFrame with columns: date, sma5.., ema5.. (NaN until warm).
+
+    `periods` overrides the default daily ladder — the backtest explorer passes a
+    coarser one for weekly/monthly bars, where MA periods count in bars, not days.
     """
+    periods = sorted({int(p) for p in (periods if periods is not None else PERIODS)})
     if prices.empty:
-        return pd.DataFrame(columns=["date", *[f"sma{p}" for p in PERIODS],
-                                     *[f"ema{p}" for p in PERIODS]])
+        return pd.DataFrame(columns=["date", *[f"sma{p}" for p in periods],
+                                     *[f"ema{p}" for p in periods]])
 
     df = prices.sort_values("date").reset_index(drop=True)
     close = df["close"].astype(float)
 
     out = pd.DataFrame({"date": df["date"].values})
-    for period in PERIODS:
+    for period in periods:
         # min_periods=period => null until we have a full window.
         out[f"sma{period}"] = close.rolling(window=period, min_periods=period).mean().values
         ema = close.ewm(span=period, adjust=False, min_periods=period).mean()

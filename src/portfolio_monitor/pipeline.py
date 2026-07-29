@@ -37,14 +37,19 @@ def _process_ticker(conn, cfg: config.Config, symbol: str, name: str,
     saved HTML always renders); the chart_path is returned separately for the
     email's inline (cid) attachment. Returns (view, note, chart_path) or raises.
     """
-    from . import fetch  # local import so tests can stub network layer
+    from . import cache, fetch  # local imports so tests can stub the network layer
 
-    df, cc = fetch.fetch_history(symbol, years=cfg.history_years,
-                                 tolerance_pct=cfg.crosscheck_tolerance_pct)
+    # Cache-first: only the tail is downloaded, and a split is detected and
+    # rescaled rather than appended onto a stale basis (ADR-0007). `window_years`
+    # keeps the report on its usual window even when the cache runs far deeper.
+    df, cc, sync = cache.load_history(
+        conn, symbol, years=cfg.history_years,
+        tolerance_pct=cfg.crosscheck_tolerance_pct,
+        window_years=cfg.history_years,
+        overlap_days=cfg.cache_overlap_days)
     problems = fetch.validate_history(df)
     if problems:
         raise RuntimeError(f"{symbol}: data failed validation: {problems}")
-    db.upsert_prices(conn, fetch.to_price_rows(symbol, df))
 
     ind = indicators.compute_indicators(df[["date", "close"]])
     db.upsert_indicators(conn, indicators.to_indicator_rows(symbol, ind))
@@ -80,7 +85,7 @@ def _process_ticker(conn, cfg: config.Config, symbol: str, name: str,
                                      [s.signal_type for s in detected], src,
                                      cross_events=cross_events, chart_html=chart_html,
                                      trend=trend, backtest_view=backtest_view)
-    return view, cc.note, chart_path
+    return view, f"{cc.note} [cache: {sync.action}, {sync.note}]", chart_path
 
 
 def run(email_mode: str = "dryrun", only: list[str] | None = None) -> int:
@@ -137,6 +142,18 @@ def run(email_mode: str = "dryrun", only: list[str] | None = None) -> int:
         report_path = REPORTS_DIR / f"{run_date}.html"
         report_path.write_text(report.render_report(ctx), encoding="utf-8")
         log.info("Report written: %s", report_path)
+
+        # Performance + signal tracker: a second, standalone artifact built from
+        # the same cached tables. Isolated so a tracker failure can never cost the
+        # user their daily report.
+        try:
+            from . import tracker_cli, tracker_report
+            rep = tracker_cli.build(conn, cfg, lookback_days=cfg.tracker_lookback_days,
+                                    index_days=cfg.tracker_index_days)
+            tracker_path = tracker_cli.write_html(tracker_report.build_view(rep))
+            log.info("Tracker written: %s", tracker_path)
+        except Exception as exc:
+            log.error("Tracker report failed (daily report unaffected): %s", exc)
 
         status_note = "; ".join(notes + (["FAILURES: " + "; ".join(failures)]
                                          if failures else []))

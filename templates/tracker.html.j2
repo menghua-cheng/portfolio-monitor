@@ -1,0 +1,196 @@
+{#- Bilingual (en/zh_TW) performance + signal tracker. Same lang_mode contract as
+    report.html.j2: "switch" (browser, both langs + top-right switcher, default EN)
+    | "en" | "zh" (single language, e.g. for email). All numbers arrive
+    preformatted from tracker_report.build_view — no computation in here. -#}
+{%- macro t(en, zh) -%}
+{%- if lang_mode == 'switch' -%}<span class="i18n en">{{ en }}</span><span class="i18n zh">{{ zh }}</span>
+{%- elif lang_mode == 'zh' -%}{{ zh }}
+{%- else -%}{{ en }}
+{%- endif -%}
+{%- endmacro -%}
+<!doctype html>
+<html lang="{{ 'en' if lang_mode != 'zh' else 'zh-Hant' }}" data-lang="{{ 'zh' if lang_mode == 'zh' else 'en' }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Performance &amp; Signal Tracker</title>
+{%- if lang_mode == 'switch' %}
+<style>
+  html[data-lang="en"] .i18n.zh { display: none; }
+  html[data-lang="zh"] .i18n.en { display: none; }
+  .lang-switch { position: fixed; top: 10px; right: 12px; z-index: 1000;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: #ffffffee; border: 1px solid #dfe3e8; border-radius: 999px;
+    padding: 3px; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  .lang-btn { border: 0; background: transparent; cursor: pointer; font-size: 12px;
+    padding: 4px 10px; border-radius: 999px; color: #66707a; line-height: 1; }
+  .lang-btn.active { background: #1d6fb8; color: #fff; font-weight: 600; }
+</style>
+{%- endif %}
+<style>
+  .wrap { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    color: #1f2933; max-width: 900px; margin: 0 auto; padding: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { background: #f4f6f8; text-align: right; padding: 7px 8px;
+       border-bottom: 2px solid #dfe3e8; white-space: nowrap; }
+  th.l, td.l { text-align: left; }
+  td { padding: 7px 8px; border-bottom: 1px solid #eef1f4; text-align: right;
+       white-space: nowrap; }
+  td.sym { font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  h2 { font-size: 16px; margin: 26px 0 8px; }
+  .muted { color: #66707a; font-size: 12px; }
+  .caveat { color: #66707a; font-size: 12px; background: #f8f9fa;
+    border-left: 3px solid #dfe3e8; padding: 8px 10px; margin-top: 10px; }
+  tr.pf td { border-top: 2px solid #dfe3e8; font-weight: 600; background: #fbfcfd; }
+</style>
+</head>
+<body style="margin:0;">
+{%- if lang_mode == 'switch' %}
+<div class="lang-switch">
+  <button class="lang-btn" data-l="en">EN</button>
+  <button class="lang-btn" data-l="zh">中文</button>
+</div>
+{%- endif %}
+<div class="wrap">
+  <h1 style="font-size:22px;margin:0 0 2px;">
+    {{ t('Portfolio Performance &amp; Signal Tracker', '投資組合績效與訊號追蹤') }}
+  </h1>
+
+{% if v.empty %}
+  <p class="muted">{{ t('No cached prices yet.', '尚無快取價格資料。') }} {{ v.note }}</p>
+{% else %}
+  <div class="muted" style="margin-bottom:14px;">
+    {{ v.as_of }} &nbsp;·&nbsp; {{ v.rows|length }} {{ t('holdings', '檔標的') }}
+    &nbsp;·&nbsp; {{ t('signals tracked over', '訊號追蹤區間') }} {{ v.lookback_days }}{{ t('d', '天') }}
+  </div>
+
+  <!-- Performance -->
+  <h2>{{ t('Performance (total return, adjusted)', '績效（調整後總報酬）') }}</h2>
+  <div class="scroll">
+  <table>
+    <tr>
+      <th class="l">{{ t('Ticker', '代號') }}</th>
+      <th class="l">{{ t('Name', '名稱') }}</th>
+      <th>{{ t('Close', '收盤') }}</th>
+      {% for en, zh in v.horizons %}<th>{{ t(en, zh) }}</th>{% endfor %}
+      <th>{{ t('Off 52w high', '距52週高') }}</th>
+    </tr>
+    {% for r in v.rows %}
+    <tr>
+      <td class="l sym">{{ r.symbol }}</td>
+      <td class="l muted">{{ r.name }}</td>
+      <td>{{ r.close }}</td>
+      {% for c in r.cells %}<td style="color:{{ c.fg }};">{{ c.text }}</td>{% endfor %}
+      <td style="color:{{ r.off_high.fg }};">{{ r.off_high.text }}</td>
+    </tr>
+    {% endfor %}
+    {% if v.portfolio %}
+    <tr class="pf">
+      <td class="l sym">{{ t('PORTFOLIO', '投資組合') }}</td>
+      <td class="l muted">{{ t('equal-weight', '等權重') }}</td>
+      <td></td>
+      {% for c in v.portfolio.cells %}<td style="color:{{ c.fg }};">{{ c.text }}</td>{% endfor %}
+      <td></td>
+    </tr>
+    {% endif %}
+  </table>
+  </div>
+  <div class="muted" style="margin-top:6px;">
+    {{ t('Tickers counted per horizon', '各區間納入標的數') }}: {{ t(v.portfolio_counts, v.portfolio_counts_zh) }}
+    {%- if v.best %} &nbsp;·&nbsp; {{ t('best today', '今日最佳') }} {{ v.best }}
+    &nbsp;·&nbsp; {{ t('worst today', '今日最弱') }} {{ v.worst }}{% endif %}
+  </div>
+  {% if v.note %}<div class="muted">{{ t('Note', '註') }}: {{ v.note }}</div>{% endif %}
+
+  {% if v.sparkline %}
+  <h2>{{ t('Equal-weight index', '等權重指數') }}</h2>
+  <div class="muted" style="margin-bottom:4px;">{{ t(v.spark_range, v.spark_range_zh) }} &nbsp;·&nbsp;
+    {{ t('start = 100; dashed line marks the 100 baseline',
+          '起點 = 100；虛線為 100 基準線') }}</div>
+  {{ v.sparkline|safe }}
+  {% endif %}
+
+  <!-- Signals -->
+  <h2>{{ t('Signals and what price did since', '訊號與其後價格表現') }}</h2>
+  {% if not v.signals %}
+  <p class="muted">{{ t('No signals recorded in the window.', '此區間內未記錄任何訊號。') }}</p>
+  {% else %}
+  <div class="scroll">
+  <table>
+    <tr>
+      <th class="l">{{ t('Ticker', '代號') }}</th>
+      <th class="l">{{ t('Signal', '訊號') }}</th>
+      <th>{{ t('Date', '日期') }}</th>
+      <th>{{ t('Age', '距今') }}</th>
+      <th>{{ t('Claim', '方向') }}</th>
+      <th>{{ t('Price then', '當時價格') }}</th>
+      <th>{{ t('Since', '其後') }}</th>
+      <th>{{ t('Verdict', '結果') }}</th>
+    </tr>
+    {% for s in v.signals %}
+    <tr>
+      <td class="l sym">{{ s.ticker }}</td>
+      <td class="l">{{ t(s.label_en, s.label_zh) }}</td>
+      <td>{{ s.date }}</td>
+      <td class="muted">{{ t(s.days_ago, s.days_ago_zh) }}</td>
+      <td style="color:{{ s.dir_fg }};">{{ t(s.dir_en, s.dir_zh) }}</td>
+      <td>{{ s.price }}</td>
+      <td style="color:{{ s.forward.fg }};">{{ s.forward.text }}</td>
+      <td style="color:{{ s.verdict_fg }};">{{ t(s.verdict_en, s.verdict_zh) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% endif %}
+
+  <!-- Hit rate -->
+  <h2>{{ t('Signal hit rate', '訊號命中率') }}</h2>
+  <div class="scroll">
+  <table>
+    <tr>
+      <th class="l">{{ t('Scope', '範圍') }}</th>
+      <th>{{ t('Hit rate', '命中率') }}</th>
+      <th class="l">{{ t('Detail', '細節') }}</th>
+    </tr>
+    {% for s in v.scores %}
+    <tr>
+      <td class="l sym">{{ t(s.scope_en, s.scope_zh) }}</td>
+      <td style="color:{{ s.fg }};">{{ s.hit_rate }}</td>
+      <td class="l muted">{{ t(s.detail_en, s.detail_zh) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+
+  {%- set caveat_en = "Hit rate tracks direction only — no entries, exits, position sizing or costs, and every signal is measured to the latest bar, so older signals get a longer runway. It answers whether this ticker's signal flow has been pointing the right way lately, not whether it is tradable. For tradability, use the backtest (portfolio-monitor-backtest)." -%}
+  {%- set caveat_zh = "命中率僅追蹤方向，不含進出場、部位大小或交易成本，且所有訊號都量測到最新一根 K 棒，因此越舊的訊號跑道越長。它回答的是「近期這檔的訊號方向對不對」，而不是「能不能交易」。要判斷可交易性，請使用回測（portfolio-monitor-backtest）。" -%}
+  <div class="caveat">{{ t(caveat_en, caveat_zh) }}</div>
+
+  <div class="muted" style="margin-top:18px;">
+    {{ t('Personal monitoring only — not investment advice.',
+          '僅供個人監控，非投資建議。') }}
+  </div>
+{% endif %}
+</div>
+{%- if lang_mode == 'switch' %}
+<script>
+(function () {
+  function apply(l) {
+    document.documentElement.setAttribute('data-lang', l);
+    document.querySelectorAll('.lang-btn').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-l') === l);
+    });
+    try { localStorage.setItem('pm-lang', l); } catch (e) {}
+  }
+  document.querySelectorAll('.lang-btn').forEach(function (b) {
+    b.addEventListener('click', function () { apply(b.getAttribute('data-l')); });
+  });
+  var saved = 'en';
+  try { saved = localStorage.getItem('pm-lang') || 'en'; } catch (e) {}
+  apply(saved);
+})();
+</script>
+{%- endif %}
+</body>
+</html>
